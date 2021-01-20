@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Server Status</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<el-form label-position="left" label-width="100px">
+			<el-form-item label="http (IPv4)">
+				<el-switch v-model="httpEnable"></el-switch>
+				<el-button icon="el-icon-refresh-right" @click="restart(4, 0)" :disabled="!httpEnable">Restart</el-button>
+			</el-form-item>
+			<el-form-item label="http (IPv6)">
+				<el-switch v-model="httpEnable6"></el-switch>
+				<el-button icon="el-icon-refresh-right" @click="restart(6, 0)" :disabled="!httpEnable6">Restart</el-button>
+			</el-form-item>
+			<el-form-item label="https (IPv4)">
+				<el-switch v-model="httpsEnable" :disabled="!sslSupport"></el-switch>
+				<el-button icon="el-icon-refresh-right" @click="restart(4, 1)" :disabled="!sslSupport || !httpsEnable">Restart</el-button>
+			</el-form-item>
+			<el-form-item label="https (IPv6)">
+				<el-switch v-model="httpsEnable6" :disabled="!sslSupport"></el-switch>
+				<el-button icon="el-icon-refresh-right" @click="restart(6, 1)" :disabled="!sslSupport || !httpsEnable6">Restart</el-button>
+			</el-form-item>
+		</el-form>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+function callback(resp) {
+	if (resp.data["retCode"][0] == "success") {
+		myapp.$message.success("Success");
+	} else {
+		myapp.$message.error(resp.data["retCode"][0]);
+	}
+}
+function showerror(error) {
+	myapp.$message.error(error.message);
+}
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			httpEnable: false,
+			httpEnable6: false,
+			sslSupport: false,
+			httpsEnable: false,
+			httpsEnable6: false
+		},
+		created: function() {
+			axios.get("/cgi/svrEnable.json").then(resp => {
+				this.httpEnable = resp.data["svrStatus"]["httpEnable"];
+				this.httpEnable6 = resp.data["svrStatus"]["httpEnable6"];
+				this.sslSupport = resp.data["svrStatus"]["sslSupport"];
+				this.httpsEnable = resp.data["svrStatus"]["httpsEnable"];
+				this.httpsEnable6 = resp.data["svrStatus"]["httpsEnable6"];
+				this.$watch("httpEnable", function(val) {
+					axios.post("/cgi/svrEnable.json", {"opType":"httpEnable","ipVersion":4,"isSSL":false,"value":val})
+						.then(callback).catch(showerror);
+				});
+				this.$watch("httpEnable6", function(val) {
+					axios.post("/cgi/svrEnable.json", {"opType":"httpEnable","ipVersion":6,"isSSL":false,"value":val})
+						.then(callback).catch(showerror);
+				});
+				this.$watch("httpsEnable", function(val) {
+					axios.post("/cgi/svrEnable.json", {"opType":"httpEnable","ipVersion":4,"isSSL":true,"value":val})
+						.then(callback).catch(showerror);
+				});
+				this.$watch("httpsEnable6", function(val) {
+					axios.post("/cgi/svrEnable.json", {"opType":"httpEnable","ipVersion":6,"isSSL":true,"value":val})
+						.then(callback).catch(showerror);
+				});
+			}).catch(error => this.$message.error(error.message));
+		},
+		methods: {
+			restart: function(ip_version, is_ssl) {
+				axios.post("/cgi/svrEnable.json", {"opType":"restart","ipVersion":ip_version,"isSSL":is_ssl})
+					.then(callback).catch(showerror);
+			}
+		},
+		watch: {
+		}
+	});
+</script>
+</body>
+</html>

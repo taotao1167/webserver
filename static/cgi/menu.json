@@ -1,0 +1,14 @@
+{
+	"menuData": [
+		{"label": "Server Status", "url": "/svrEnable.html"},
+		{"label": "Link List", "url": "/linkList.html"},
+		{"label": "Session List", "url": "/sessionList.html"},
+		{"label": "Test", "children": [
+			{"label": "GET", "url": "/testGet.html"},
+			{"label": "POST", "url": "/testPost.html"},
+			{"label": "Upload", "url": "/testUpload.html"},
+			{"label": "Download", "url": "/testDownload.html"},
+			{"label": "WebSocket", "url": "/testWebsocket.html"}
+		]}
+	]
+}

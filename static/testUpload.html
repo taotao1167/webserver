@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>TEST Upload</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<myupload multiple ref="boxUpload" :change="handleChange">
+			<i class="el-icon-upload"></i>
+			<div class="el-upload__text">Drop files or <em>Click here</em>.</div>
+		</myupload>
+		<el-button type="primary" @click="uploadFile">Upload</el-button>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			fileList: null,
+			status: null
+		},
+		methods: {
+			handleChange: function(fileList, status) {
+				this.fileList = fileList;
+				this.status= status;
+			},
+			uploadFile: function() {
+				if (this.fileList == null || this.fileList.length == 0) {
+					this.$message.error("Select file first!");
+					return;
+				}
+				for (let i = 0; i < this.fileList.length; i++) {
+					if (this.$refs["boxUpload"].status[i].isFin) {
+						continue;
+					}
+					var fmData = new FormData();
+					fmData.append("file2", this.fileList[i]);
+					var config = {
+						headers:{'Content-Type':'multipart/form-data'},
+						onUploadProgress: function (evt) {
+							myapp.$refs["boxUpload"].status[i].percent = Math.floor(evt.loaded * 100 / evt.total);
+						}
+					};
+					axios.post("/cgi/testUpload.json", fmData, config).then(resp => {
+						this.$refs["boxUpload"].status[i].isSuccess = Boolean(resp.data["retCode"][0] == "success");
+						this.$refs["boxUpload"].status[i].isFin = true;
+					}).catch(error => {
+						this.$refs["boxUpload"].status[i].isSuccess = false;
+						this.$refs["boxUpload"].status[i].isFin = true;
+						this.$message.error(error.message);
+					});
+				}
+			}
+		}
+	});
+</script>
+</body>
+</html>

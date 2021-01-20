@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Session List</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<el-table :data="sessions">
+			<el-table-column type="expand" v-slot="item">
+				<el-form label-position="left" label-width="100px">
+					<el-form-item label="Session ID">{{item.row.id}}</el-form-item>
+					<el-form-item label="IP">{{item.row.ip}}</el-form-item>
+					<el-form-item label="Create">{{item.row.create}}</el-form-item>
+					<el-form-item label="Active">{{item.row.active}}</el-form-item>
+					<el-form-item label="Expires">{{item.row.expires}}</el-form-item>
+					<el-form-item label="Is Online">{{item.row.isOnline ? "Yes" : "No"}}</el-form-item>
+					<el-form-item label="Signin">{{item.row.signin}}</el-form-item>
+					<el-form-item label="Heartbeat">{{item.row.heartbeat}}</el-form-item>
+					<el-form-item label="Username">{{item.row.uname}}</el-form-item>
+					<el-form-item label="Level">{{item.row.level}}</el-form-item>
+					<el-form-item label="Online">{{item.row.online}}</el-form-item>
+				</el-form>
+			</el-table-column>
+			
+			<el-table-column prop="id" label="Session ID" v-slot="item">{{item.row.id.slice(0,8) + "..."}}</el-table-column>
+			<el-table-column prop="ip" label="IP"></el-table-column>
+			<el-table-column prop="uname" label="Username"></el-table-column>
+			<el-table-column prop="level" label="Level"></el-table-column>
+			<el-table-column prop="online" label="Online"></el-table-column>
+		</el-table>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			sessions: []
+		},
+		created: function() {
+			axios.get("/cgi/sessionList.json").then(resp => 
+				this.sessions = resp.data["sessions"]
+			).catch(error => this.$message.error(error.message));
+		}
+	});
+</script>
+</body>
+</html>

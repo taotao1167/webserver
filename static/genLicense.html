@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Maview License</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<el-dialog title="Success" width="400px" :visible.sync="showDownload">
+			<div>Generate License success, Click button to download.</div>
+			<div slot="footer">
+				<el-button @click="showDownload=false">Cancel</el-button>
+				<el-button type="primary" @click="downloadFile">Download</el-button>
+			</div>
+		</el-dialog>
+		<el-form label-position="left" label-width="100px">
+			<el-form-item label="Username">
+				<el-input placeholder="Username" v-model="formData.subject"></el-input>
+			</el-form-item>
+			<el-form-item label="MachineID">
+				<el-input placeholder="MachineID" v-model="formData.machine_id"></el-input>
+			</el-form-item>
+			<el-form-item label="Type">
+				<el-select placeholder="Please Select" v-model="formData.type">
+					<el-option v-for="item in formRule.typeOptions" :key="item.val" :label="item.lb" :value="item.val"></el-option>
+				</el-select>
+			</el-form-item>
+			<el-form-item label="Days">
+				<el-select placeholder="Please Select" v-model="formData.days">
+					<el-option v-for="item in formRule.daysOptions" :key="item.val" :label="item.lb" :value="item.val"></el-option>
+				</el-select>
+			</el-form-item>
+		</el-form>
+		<el-button type="primary" @click="genLicense">Apply</el-button>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			showDownload: false,
+			downloadPath: "",
+			formRule: {
+				typeOptions: [
+					{lb:'Develop',val:'develop'},
+					{lb:'Prefessional',val:'prefessional'},
+					{lb:'Business',val:'business'},
+					{lb:'Personal',val:'personal'},
+					{lb:'Trial',val:'trial'},
+				],
+				daysOptions: [
+					{lb:'30 Days (1 Month)',val:'30'},
+					{lb:'90 Days (3 Months)',val:'90'},
+					{lb:'365 Days (1 Year)',val:'365'},
+					{lb:'1825 Days (5 Years)',val:'1825'},
+					{lb:'3650 Days (10 Years)',val:'3650'},
+				]
+			},
+			formData: {
+				subject: "",
+				type: "personal",
+				machine_id: "",
+				days: "365",
+			}
+		},
+		methods: {
+			genLicense: function() {
+				axios.post("/cgi/genLicense.json", this.formData).then(resp => {
+					if (resp.data["retCode"][0] == "success") {
+						this.downloadPath = resp.data["path"];
+						this.showDownload = true;
+					} else {
+						this.$message.error(resp.data["retCode"][0]);
+					}
+				}).catch(error => this.$message.error(error.message));
+			},
+			downloadFile: function() {
+				this.showDownload = false;
+				document.location.href = this.downloadPath;
+			}
+		}
+	});
+</script>
+</body>
+</html>

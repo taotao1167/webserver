@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>TEST Websocket</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<el-form label-position="left" label-width="100px">
+			<el-form-item label="URL">
+				<el-input placeholder="URL" v-model="formData.wsurl"></el-input>
+			</el-form-item>
+			<el-form-item label="Send Buf">
+				<el-input type="textarea" v-model="formData.sendBuf" :disabled="!connected"></el-input>
+			</el-form-item>
+		</el-form>
+		<el-button @click="open_websocket" :disabled="connected">Open</el-button>
+		<el-button @click="close_websocket" :disabled="!connected">Close</el-button>
+		<el-button type="primary" @click="send_msg" :disabled="!connected">Send</el-button>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+var g_ws;
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			connected: false,
+			formData: {
+				wsurl: "ws://" + document.location.host + "/ws/test",
+				sendBuf: "hello, world!"
+			}
+		},
+		methods: {
+			open_websocket: function() {
+				if(!window.WebSocket){
+					this.$alert("your browser not support websocket.", "Not Support");
+					return;
+				}
+				g_ws = new WebSocket(this.formData.wsurl);
+				g_ws.onopen = function(){
+					myapp.connected = true;
+					myapp.$notify.success({title:"Success",message:"websocket connected!"});
+				};
+				g_ws.onmessage = function(evt){ 
+					var received_msg = evt.data;
+					myapp.$notify.info({title:"Notify",message:received_msg});
+				};
+				g_ws.onclose = function(){
+					myapp.connected = false;
+					myapp.$notify.warning({title:"Closed",message:"websocket closed!"});
+				};
+				g_ws.onerror = function(){
+					myapp.$notify.error({title:"Error",message:"websocket error!"});
+				};
+			},
+			close_websocket: function() {
+				g_ws.close();
+			},
+			send_msg: function() {
+				g_ws.send(myapp.formData.sendBuf);
+			}
+		}
+	});
+</script>
+</body>
+</html>

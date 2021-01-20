@@ -1,0 +1,19 @@
+{
+	"retCode":["null"],
+	"links": [
+		{
+			"ipVersion":"IPv4",
+			"ip":"192.168.56.10",
+			"port":"60321",
+			"state":"STATE_RECVING[0]",
+			"ssl":false
+		},
+		{
+			"ipVersion":"IPv4",
+			"ip":"192.168.56.10",
+			"port":"60466",
+			"state":"STATE_RESPONSING",
+			"ssl":false
+		}
+	]
+}

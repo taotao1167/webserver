@@ -1,0 +1,34 @@
+{
+	"retCode":["null"],
+	"total": 1000,
+	"curPage": 5,
+	"pageSize": 10,
+	"licenses": [
+		{
+			"id":1,
+			"version":"1.0",
+			"issuer":"Kyland",
+			"subject":"taoqiwang",
+			"licenseType":"personal",
+			"machineId":"959c73d0a8e843b83f075da7ff19f89eb65b4db5dd07bf1d5d9521470b65d857",
+			"create":1599200569,
+			"expires":1601792569,
+			"hashAlgorithm":"sha256",
+			"signAlgorithm":"rsa",
+			"path":"/download/480e16b915251273e53a36ff75d6641b26f263e0"
+		},
+		{
+			"id":2,
+			"version":"1.0",
+			"issuer":"Kyland",
+			"subject":"testuser",
+			"licenseType":"personal",
+			"machineId":"959c73d0a8e843b83f075da7ff19f89eb65b4db5dd07bf1d5d9521470b65d857",
+			"create":1599203569,
+			"expires":1601795569,
+			"hashAlgorithm":"sha256",
+			"signAlgorithm":"rsa",
+			"path":"/download/432eac85f02adad6100aee5024125853a20d7fb9"
+		}
+	]
+}

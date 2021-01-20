@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Server List</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<el-table :data="svrs">
+			<el-table-column prop="id" label="Id"></el-table-column>
+			<el-table-column prop="name" label="Name"></el-table-column>
+			<el-table-column prop="ip_version" label="IP Version"></el-table-column>
+			<el-table-column prop="port" label="Port"></el-table-column>
+			<el-table-column prop="ssl" label="SSL" v-slot="item">{{item.row.ssl ? "Yes" : "No"}}</el-table-column>
+			<el-table-column label="Operation">
+				<template v-slot="item">
+					<el-button size="mini" type="danger" @click="svrDelete(item.row.id);">Detele</el-button>
+				</template>
+			</el-table-column>
+		</el-table>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			svrs: []
+		},
+		created: function() {
+			axios.get("/cgi/svrList.json")
+				.then(resp => this.svrs = resp.data["svrs"]);
+		},
+		methods: {
+			svrDelete: function(item_id) {
+				axios.post("/cgi/svrList.json", {"action":"delete","id":item_id}).then(resp => {
+					if (resp.data["retCode"][0] == "success") {
+						this.$message.success("Success");
+					} else {
+						this.$message.error(resp.data["retCode"][0]);
+					}
+					this.svrs = resp.data["svrs"];
+				}).catch(error => this.$message.error(error.message));
+			}
+		}
+	});
+</script>
+</body>
+</html>

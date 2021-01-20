@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>SSL Config</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="app">
+	<el-dialog title="Dialog" width="400px" :visible.sync="dialogVis">
+		<el-upload drag action="/cgi/addCert.json" :auto-upload="false" :file-list="fList" ref="uploadBtn">
+			<i class="el-icon-upload"></i>
+			<div class="el-upload__text">Drop file or <em>click here</em> to upload</div>
+		</el-upload>
+		<div slot="footer" class="dialog-footer">
+			<el-button @click="dialogVis=false">Cancel</el-button>
+			<el-button type="primary" @click="dialogVis=false">Apply</el-button>
+			<el-button @click="clearFiles('uploadBtn')">Clear</el-button>
+		</div>
+	</el-dialog>
+</div>
+<script>
+var vm = new Vue({
+		el:"#app",
+		data: {
+			dialogVis: true,
+			fList: [{name:"demo.crt",url:"/123.txt"}]
+		},
+		methods: {
+			clearFiles: function(btnName) {
+				this.$refs[btnName].clearFiles();
+			}
+		}
+	});
+</script>
+
+</body>
+</html>

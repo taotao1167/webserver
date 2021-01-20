@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>License List</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<el-table :data="licenses">
+			<el-table-column type="expand" v-slot="item">
+				<el-form label-position="left" label-width="160px">
+					<el-form-item label="ID">{{item.row.id}}</el-form-item>
+					<el-form-item label="Version">{{item.row.version}}</el-form-item>
+					<el-form-item label="Issuer">{{item.row.issuer}}</el-form-item>
+					<el-form-item label="Username">{{item.row.subject}}</el-form-item>
+					<el-form-item label="Type">{{item.row.licenseType}}</el-form-item>
+					<el-form-item label="MachineID">{{item.row.machineId}}</el-form-item>
+					<el-form-item label="Create">{{item.row.create}}</el-form-item>
+					<el-form-item label="Expires">{{item.row.expires}}</el-form-item>
+					<el-form-item label="Hash Algorithm">{{item.row.hashAlgorithm}}</el-form-item>
+					<el-form-item label="Sign Algorithm">{{item.row.signAlgorithm}}</el-form-item>
+				</el-form>
+			</el-table-column>
+			<el-table-column prop="id" label="ID" width="60px"></el-table-column>
+			<el-table-column prop="subject" label="Username"></el-table-column>
+			<el-table-column prop="licenseType" label="Type"></el-table-column>
+			<el-table-column prop="machineId" label="MachineID" v-slot="item">{{item.row.machineId.slice(0,8) + "..."}}</el-table-column>
+			<el-table-column prop="create" label="Create"></el-table-column>
+			<el-table-column prop="expires" label="Expires"></el-table-column>
+			<el-table-column prop="path" label="" v-slot="item" width="48px">
+				<el-button type="primary" class="el-icon-download" circle @click="downloadFile(item.row.path);"></el-button>
+			</el-table-column>
+		</el-table>
+		<el-pagination layout="prev, pager, next" :page-size="pageSize" :pager-count="11" :current-page.sync="curPage" :total="total" :hide-on-single-page="true" @current-change="pageChange">
+  </el-pagination>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+function callback(resp) {
+	var licenses = resp.data["licenses"];
+	for (var i = 0; i < licenses.length; i++) {
+		licenses[i]["create"] = timeFormat(licenses[i]["create"]);
+		licenses[i]["expires"] = timeFormat(licenses[i]["expires"]);
+	}
+	myapp.licenses = licenses;
+	myapp.total = resp.data["total"];
+	myapp.curPage = resp.data["curPage"];
+	myapp.pageSize = resp.data["pageSize"];
+}
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			curPage: 0,
+			pageSize: 0,
+			total: 0,
+			licenses: []
+		},
+		created: function() {
+			axios.get("/cgi/licenseList.json")
+				.then(callback).catch(error => this.$message.error(error.message));
+		},
+		methods: {
+			downloadFile(path) {
+				document.location.href = path;
+			},
+			pageChange: function(newPage) {
+				axios.get("/cgi/licenseList.json?curPage=" + newPage)
+					.then(callback).catch(error => this.$message.error(error.message));
+			}
+		}
+	});
+</script>
+</body>
+</html>

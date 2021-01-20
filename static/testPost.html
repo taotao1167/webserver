@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Test POST</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<el-form label-position="left" label-width="100px">
+			<el-form-item label="Entry1">
+				<el-input placeholder="Entry1" v-model="formData.entry1"></el-input>
+			</el-form-item>
+			<el-form-item label="Entry2">
+				<el-input placeholder="Entry2" v-model="formData.entry2"></el-input>
+			</el-form-item>
+			<el-form-item label="Entry3">
+				<el-input placeholder="Entry3" v-model="formData.entry3"></el-input>
+			</el-form-item>
+		</el-form>
+		<el-button type="primary" @click="formSubmit">Apply</el-button>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			formData: {
+				entry1: "",
+				entry2: "",
+				entry3: ""
+			}
+		},
+		methods: {
+			formSubmit: function () {
+				axios.post("/cgi/testPost.json", this.formData).then(resp => {
+					var buf = "";
+					buf += "entry1: " + resp.data["entry1"] + "; ";
+					buf += "entry2: " + resp.data["entry2"] + "; ";
+					buf += "entry3: " + resp.data["entry3"] + "; ";
+					this.$alert(buf, "Your Input", {confirmButtonText:"Confirm"})
+				}).catch(error => this.$message.error(error.message));
+			}
+		}
+	});
+</script>
+</body>
+</html>

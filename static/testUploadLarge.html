@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>TEST Upload Large</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<myupload ref="boxUpload" :change="handleChange">
+			<i class="el-icon-upload"></i>
+			<div class="el-upload__text">Drop files or <em>Click here</em>.</div>
+		</myupload>
+		<el-button type="primary" @click="uploadFile">Upload</el-button>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+class Uploader {
+	constructor(config) {
+		this.file = config["file"];
+		this.url = config["url"];
+		this.file_size = 0;
+		this.fr = new FileReader();
+		this.slice_size = 5 * 1024 * 1024; // slice size
+		this.buffer = null;
+		this.xhr = new XMLHttpRequest();
+		this.file_offset = 0;
+		this.fr.onloadstart = function(evt) {},
+		this.fr.onprogress = function(evt) {},
+		this.fr.onload = function(evt) {
+				console.log(this);
+				this.buffer = evt.target.result;
+				this.send_content();
+			}.bind(this);
+		this.fr.onabort = function(evt) {
+				console.log(evt.type);
+			};
+		this.fr.onerror = function(evt) {
+				console.log(evt.type);
+			};
+		this.fr.onloadend = function(evt) {},
+		this.onUploadProgress = null
+		if (config.hasOwnProperty("onUploadProgress")) {
+			this.onUploadProgress = config["onUploadProgress"];
+		}
+	}
+	send_content() {
+		var fmData = new FormData();
+		var partFile = new File([this.buffer], this.file.name);
+		fmData.append("file_content", partFile);
+		fmData.append("file_size", this.file_size);
+		fmData.append("file_offset", this.file_offset);
+		var config = {
+			headers:{'Content-Type':'multipart/form-data'},
+			onUploadProgress: function (evt) {
+				this.onUploadProgress(this.file_offset + evt.loaded, this.file_size, false);
+			}.bind(this)
+		};
+		axios.post(this.url, fmData, config).then(function(resp) {
+			var jsondata = resp.data;
+			var code = jsondata["retCode"][0];
+			if (code == "null") {
+				if (jsondata.stored < this.file_size) {
+					this.file_offset = jsondata.stored;
+					this.file_read();
+				} else {
+					Vue.prototype.$message.error("stored out of range!");
+				}
+			} else {
+				if (code == "success") {
+					if (jsondata.stored == this.file_size) {
+						this.file_offset = jsondata.stored;
+					} else {
+						Vue.prototype.$message.error("return success but filesize dismatch!");
+					}
+				} else {
+					Vue.prototype.$message.error(code)
+				}
+			}
+			if (this.onUploadProgress) {
+				this.onUploadProgress(jsondata.stored, this.file_size, true);
+			}
+		}.bind(this)).catch(error => Vue.prototype.$message.error(error.message));
+	}
+	file_read() {
+		if (this.file_offset + this.slice_size < this.file_size) {
+			this.fr.readAsArrayBuffer(this.file.slice(this.file_offset, this.file_offset + this.slice_size));
+		} else {
+			this.fr.readAsArrayBuffer(this.file.slice(this.file_offset, this.file_size));
+		}
+	}
+	start_upload() {
+		this.file.slice = this.file.slice || this.file.webkitSlice || this.file.mozSlice || null;
+		if (!this.file.slice) {
+			alert("Your browser is too old, not support 'File.slice'!");
+			return;
+		}
+		this.file_size = this.file.size;
+		this.file_read();
+	}
+}
+</script>
+<script>
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			fileList: null,
+			status: null
+		},
+		methods: {
+			handleChange: function(fileList, status) {
+				this.fileList = fileList;
+				this.status = status;
+			},
+			uploadFile: function() {
+				if (this.fileList == null || this.fileList.length == 0) {
+					this.$message.error("Select file first!");
+					return;
+				}
+				for (let i = 0; i < this.fileList.length; i++) {
+					if (this.$refs["boxUpload"].status[i].isFin) {
+						continue;
+					}
+					var uploader = new Uploader({
+						url: "/cgi/testUploadLarge.json",
+						file: this.fileList[i],
+						onUploadProgress: function (loaded, total, partFin) {
+							myapp.$refs["boxUpload"].status[i].percent = Math.floor(loaded * 100 / total);
+							myapp.$refs["boxUpload"].status[i].isSuccess = Boolean(loaded == this.file_size);
+							myapp.$refs["boxUpload"].status[i].isFin = true;
+						}
+					});
+					uploader.start_upload();
+				}
+			}
+		}
+	});
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+	"retCode":["null"],
+	"svrStatus": {
+		"httpEnable": true,
+		"httpEnable6": true,
+		"sslSupport": true,
+		"httpsEnable": true,
+		"httpsEnable6": true
+	}
+}

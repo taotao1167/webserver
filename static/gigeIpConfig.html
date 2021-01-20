@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Ip Config</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<el-dialog title="Modify" width="400px" :visible.sync="dialogShow">
+			<el-form label-position="left" label-width="100px">
+				<el-form-item label="Ip">
+					<el-input v-model="modifyData.ip"></el-button>
+				</el-form-item>
+				<el-form-item label="Subnet Mask">
+					<el-input v-model="modifyData.mask"></el-button>
+				</el-form-item>
+				<el-form-item label="Gateway">
+					<el-input v-model="modifyData.gateway"></el-button>
+				</el-form-item>
+			</el-form>
+			<div slot="footer">
+				<el-button @click="dialogShow=false">Cancel</el-button>
+				<el-button type="primary" @click="modifyIp">Apply</el-button>
+			</div>
+		</el-dialog>
+		<el-table :data="cameras">
+			<el-table-column prop="type" label="Type"></el-table-column>
+			<el-table-column prop="addr" label="Address"></el-table-column>
+			<el-table-column prop="ip" label="Ip"></el-table-column>
+			<el-table-column prop="mask" label="Subnet Mask"></el-table-column>
+			<el-table-column prop="gateway" label="Gateway"></el-table-column>
+			<el-table-column label="" v-slot="item">
+				<el-button type="primary" class="el-icon-edit" @click="showModifyBox(item.$index)" circle></el-button>
+			</el-table-column>
+		</el-table>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			dialogShow: false,
+			modifyData: {
+				idx:0,
+				ip:"",
+				mask:"",
+				gateway:""
+			},
+			cameras: []
+		},
+		created: function() {
+			axios.get("/cgi/gigeIpConfig.json")
+				.then(resp => this.cameras = resp.data["cameras"]);
+		},
+		methods: {
+			showModifyBox: function(idx) {
+				this.modifyData.idx = idx;
+				this.modifyData.ip = this.cameras[idx].ip;
+				this.modifyData.mask = this.cameras[idx].mask;
+				this.modifyData.gateway = this.cameras[idx].gateway;
+				this.dialogShow = true;
+			},
+			modifyIp: function() {
+				console.log(this.modifyData.ip);
+				console.log(this.modifyData.mask);
+				console.log(this.modifyData.gateway);
+				this.dialogShow = false;
+			}
+		}
+	});
+</script>
+</body>
+</html>

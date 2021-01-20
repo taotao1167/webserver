@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Link List</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<el-table :data="links">
+			<el-table-column prop="ip_version" label="IP Version" width="100px"></el-table-column>
+			<el-table-column prop="peer_addr" label="Peer Address"></el-table-column>
+			<el-table-column prop="local_addr" label="Local Address"></el-table-column>
+			<el-table-column prop="state" label="Link State"></el-table-column>
+			<el-table-column prop="ssl" label="SSL" v-slot="item" width="100px">{{item.row.ssl ? "Yes" : "No"}}</el-table-column>
+		</el-table>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			links: []
+		},
+		created: function() {
+			axios.get("/cgi/linkList.json")
+				.then(resp => this.links = resp.data["links"]);
+		}
+	});
+</script>
+</body>
+</html>

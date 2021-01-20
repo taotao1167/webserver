@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>TEST MSE</title>
+</head>
+<body>
+	<div>
+	<input type="file" id="file_btn"></input>
+	<input type="button" onclick="playvideo();"></input>
+	</div>
+	<video id="videobox" autoplay controls muted onwaiting="readfile();" oncanplay="javascript:video_canplay=true;"></video>
+</div>
+<script>
+var url = 'cat_shit_one.webm';
+var mime_codec = 'video/webm; codecs="vp9, opus"';
+
+var fr = null;
+var file = null;
+var file_offset = 0;
+var slice_size = 4096;
+var video_canplay = false;
+
+function playvideo() {
+	if (!('MediaSource' in window) || !MediaSource.isTypeSupported(mime_codec)) {
+		console.error('Unsupported MIME type or codec: ', mime_codec);
+		return;
+	}
+	var ms = new MediaSource();
+	var vbox = document.getElementById('videobox');
+	ms.addEventListener('sourceopen', ms_open);
+	vbox.src = URL.createObjectURL(ms);
+}
+function ms_open(evt) {
+	var ms = evt.target;
+	var sbuf = ms.addSourceBuffer(mime_codec);
+	sbuf.addEventListener('update', function (_) {
+		console.log("update fired");
+	});
+	sbuf.addEventListener('updateend', function (_) {
+		var vbox = document.getElementById('videobox');
+		console.log("updateend fired");
+		if (video_canplay) {
+			vbox.play();
+		} else {
+			readfile();
+		}
+		// ms.endOfStream();
+		// vbox.play();
+	});
+	file = document.getElementById("file_btn").files[0];
+	file.slice = file.slice || file.webkitSlice || file.mozSlice || null;
+	if (!file.slice) {
+		console.error("Your browser is too old, not support 'File.slice'!");
+		return;
+	}
+	fr = new FileReader();
+	fr.onload = function (evt) {
+		console.log(evt.target.result);
+		sbuf.appendBuffer(evt.target.result);
+  	};
+	readfile();
+};
+
+function readfile() {
+	console.log("readfile");
+	video_canplay = false;
+	if (file_offset + slice_size < file.size) {
+		fr.readAsArrayBuffer(file.slice(file_offset, file_offset + slice_size));
+		file_offset += slice_size;
+	} else {
+		fr.readAsArrayBuffer(file.slice(file_offset, file.size));
+		file_offset = file.size; 
+	}
+};
+</script>
+</body>
+</html>
+
