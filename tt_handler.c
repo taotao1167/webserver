@@ -17,8 +17,10 @@
 #endif
 
 static RBTree g_http_hanler_tree;
-static RBTree g_websocket_hanler_tree;
 static RBTree g_msg_hanler_tree;
+#ifdef WITH_WEBSOCKET
+static RBTree g_websocket_hanler_tree;
+#endif
 
 static int str_compare(void *key1, void *key2) {
 	return strcmp((char *)key1, (char *)key2);
@@ -157,7 +159,7 @@ static void msg_handler_freepayload(void **payload) {
 void tt_msg_handler_init() {
 	RBT_init(&g_msg_hanler_tree, msg_handler_getkey, str_compare, str_keyprint, msg_handler_freepayload);
 }
-int tt_msg_handler_add(const char *name, int (*callback)(const char *name, void *buf, size_t len)) {
+int tt_msg_handler_add(const char *name, int (*callback)(const char *name, void *payload, size_t payload_len)) {
 	MSG_HANDLER *handler = NULL;
 	int ret = 0;
 	handler = (MSG_HANDLER *)MY_MALLOC(sizeof(MSG_HANDLER));
@@ -183,7 +185,7 @@ int tt_msg_handler_del(const char *name) {
 	RBT_delete(&g_msg_hanler_tree, (void *)name);
 	return 0;
 }
-int (* tt_msg_handler_get(const char *name))(const char *name, void *buf, size_t len) {
+int (* tt_msg_handler_get(const char *name))(const char *name, void *payload, size_t payload_len) {
 	void *payload = NULL;
 	payload = RBT_search(g_msg_hanler_tree, (void *)name);
 	if (payload != NULL) {

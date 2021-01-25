@@ -6,8 +6,8 @@ extern "C" {
 #endif
 
 typedef struct ST_HTTP_HANDLER{
-	char *path; /* 路径 */
-	int (*callback)(HTTP_FD *); /* 回调函数 */
+	char *path;
+	int (*callback)(HTTP_FD *);
 }HTTP_HANDLER;
 
 extern void tt_handler_init();
@@ -19,8 +19,8 @@ extern void tt_handler_print();
 
 #ifdef WITH_WEBSOCKET
 typedef struct ST_WS_HANDLER{
-	char *path; /* 路径 */
-	int (*callback)(HTTP_FD *, E_WS_EVENT); /* 回调函数 */
+	char *path;
+	int (*callback)(HTTP_FD *, E_WS_EVENT);
 }WS_HANDLER;
 
 extern void tt_ws_handler_init();
@@ -32,14 +32,14 @@ extern void tt_ws_handler_print();
 #endif
 
 typedef struct ST_MSG_HANDLER{
-	char *name; /* 名称 */
-	int (*callback)(const char *name, void *buf, size_t len); /* 回调函数 */
+	char *name;
+	int (*callback)(const char *name, void *buf, size_t len);
 }MSG_HANDLER;
 
 extern void tt_msg_handler_init();
-extern int tt_msg_handler_add(const char *path, int (*handler)(const char *name, void *buf, size_t len));
+extern int tt_msg_handler_add(const char *path, int (*handler)(const char *name, void *payload, size_t payload_len));
 extern int tt_msg_handler_del(const char *path);
-extern int (* tt_msg_handler_get(const char *path))(const char *name, void *buf, size_t len);
+int (* tt_msg_handler_get(const char *name))(const char *name, void *payload, size_t payload_len);
 extern void tt_msg_handler_destory_all();
 extern void tt_msg_handler_print();
 

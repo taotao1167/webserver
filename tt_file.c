@@ -25,21 +25,21 @@ TT_FILE *g_file_info = NULL;
 #define swap_u32(x)((((x) & 0x000000ff) << 24) | (((x) & 0x0000ff00) <<  8) | (((x) & 0x00ff0000) >>  8) | (((x) & 0xff000000) >> 24))
 
 typedef struct ST_TREE_INFO {
-	char ftype; //'F'表示文件，'D'表示文件夹
-	unsigned char gzip; //是否经过gzip压缩的
-	unsigned char reserve[2]; //保留字段
-	unsigned int fname_offset; //文件名/文件夹名相对文件头的偏移量
+	char ftype; //'F': file; 'D': directory
+	unsigned char gzip; // is gzip or not
+	unsigned char reserve[2];
+	unsigned int fname_offset; // file/director offset
 	union{
-		unsigned int fcontent_offset; //给文件用，文件内容相对文件头的偏移量
-		unsigned int child_first; //给文件夹用，第一个孩子的索引
+		unsigned int fcontent_offset; // for file, file content offset
+		unsigned int child_first; // for directory, index of first child
 	};
 	union{
-		unsigned int fsize; //给文件用，文件内容大小
-		unsigned int child_num; //给文件夹用，孩子的数量
+		unsigned int fsize; // for file, file size
+		unsigned int child_num; // for directoy, count of children
 	};
-	unsigned int parent_id; //父文件夹的索引
-	unsigned int brother_id; //兄弟的索引
-	unsigned char md5[16]; //文件的MD5值，二进制形式，如果是文件夹为全0
+	unsigned int parent_id; // index of father
+	unsigned int brother_id; // index of litter brother
+	unsigned char md5[16]; // file md5sum, binary format, zeros if director
 }TREE_INFO;
 
 int init_tree_info(unsigned char *package, unsigned long package_len) {
@@ -75,7 +75,7 @@ int init_tree_info(unsigned char *package, unsigned long package_len) {
 	memset(g_file_info, 0, sizeof(TT_FILE) * tree_count);
 
 	memcpy(tree_info, package + PACKAGE_HEAD_LEN, tree_size);
-	if (*((unsigned char *)(&byte_order_test))) { // 如果是小端，需要转换下字节序
+	if (*((unsigned char *)(&byte_order_test))) {
 		for (i = 0; i < tree_count; i++) {
 			tree_info[i].fname_offset = swap_u32(tree_info[i].fname_offset);
 			tree_info[i].fcontent_offset = swap_u32(tree_info[i].fcontent_offset);

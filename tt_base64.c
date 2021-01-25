@@ -88,8 +88,8 @@ static int decodeGroup(unsigned char *out_bin, char *in_base64, size_t *out_len)
 }
 
 int tt_base64_encode(char **dst_str, unsigned char *in_bin, size_t in_len) {
-	unsigned char *p_src;
-	char *p_dst;
+	unsigned char *p_src = NULL;
+	char *p_dst = NULL;
 
 	if (NULL == dst_str) {
 		return -1;
@@ -102,10 +102,10 @@ int tt_base64_encode(char **dst_str, unsigned char *in_bin, size_t in_len) {
 	if (*dst_str == NULL) {
 		return -1;
 	}
-	for (p_dst = *dst_str, p_src = in_bin; p_src - in_bin < in_len; p_src += 3, p_dst += 4) {
-		if (p_src - in_bin == in_len - 2) {
+	for (p_dst = *dst_str, p_src = in_bin; p_src < in_bin + in_len; p_src += 3, p_dst += 4) {
+		if (p_src == in_bin + in_len - 2) {
 			encodeGroup(p_dst, p_src, 2);
-		} else if (p_src - in_bin == in_len - 1) {
+		} else if (p_src == in_bin + in_len - 1) {
 			encodeGroup(p_dst, p_src, 1);
 		} else {
 			encodeGroup(p_dst, p_src, 3);

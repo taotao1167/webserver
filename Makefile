@@ -34,6 +34,7 @@ app: ${LIBNAME} main.c
 
 ${LIBNAME}: ${OBJS_C} ${OBJS_CPP}
 	ar -r $@ ${OBJS_C} ${OBJS_CPP}
+	@mkdir -p include/
 	@cp *.h include/
 
 ${OBJS_C}: %.o: %.c
@@ -45,6 +46,7 @@ ${OBJS_CPP}: %.o: %.cpp
 
 clean:
 	@rm -f app
+	@rm -rf include
 	@rm -f ${LIBNAME}
 	@rm -f *.o
 

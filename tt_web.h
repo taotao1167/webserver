@@ -18,32 +18,32 @@ extern "C" {
 #endif
 
 typedef enum e_http_state{
-	STATE_RECVING = 1, /* 接收请求中 */
-	STATE_SUSPEND, /* 挂起连接，等待其他事件触发，这是为后续扩展考虑的，目前没用到 */
-	STATE_RESPONSING, /* 生成响应中 */
-	STATE_SENDING, /* 返回响应中 */
-	STATE_CLOSING, /* 需要将内容发送完后断开连接 */
-	STATE_CLOSED, /* 连接已经可以断开，所有资源也可回收 */
+	STATE_RECVING = 1, /* data recving */
+	STATE_SUSPEND, /* suspend this line until trigger target event */
+	STATE_RESPONSING, /* generating response content */
+	STATE_SENDING, /* sending data to peer */
+	STATE_CLOSING, /* sending data to peer, close linke when all data is sended */
+	STATE_CLOSED, /* nothing is need to do, should close link and free resource */
 #ifdef WITH_WEBSOCKET
-	STATE_WS_HANDSHAKE, /* websocket握手包回复中 */
-	STATE_WS_CONNECTED, /* websocket已成功连接 */
+	STATE_WS_HANDSHAKE, /* responsing websocket handshake package */
+	STATE_WS_CONNECTED, /* websocket is connected */
 #endif
 }E_HTTP_STATE;
 
 typedef enum e_http_send_state{
-	SENDING_HEAD = 1, /* 发送消息头中 */
-	SENDING_ENTITY, /* 发送消息体中 */
+	SENDING_HEAD = 1, /* sending http head */
+	SENDING_ENTITY, /* sending http entity */
 }E_HTTP_SEND_STATE;
 
 #ifdef WITH_WEBSOCKET
 typedef enum e_ws_event{
-	EVENT_ONOPEN = 1, /* 连接事件 */
-	EVENT_ONMESSAGE, /* 消息事件 */
-	EVENT_ONCLOSE, /* 关闭事件 */
-	EVENT_ONERROR, /* 出错事件 */
-	EVENT_ONPING, /* 接受到PING包 */
-	EVENT_ONPONG, /* 接受到PONG包 */
-	EVENT_ONCHUNKED, /* 接受到分块 */
+	EVENT_ONOPEN = 1, /* open */
+	EVENT_ONMESSAGE, /* recv a package */
+	EVENT_ONCLOSE, /* close */
+	EVENT_ONERROR, /* error */
+	EVENT_ONPING, /* recv a PING package */
+	EVENT_ONPONG, /* recv a PONG package */
+	EVENT_ONCHUNKED, /* recv a chunked package */
 }E_WS_EVENT;
 
 typedef enum e_ws_opcode{
@@ -56,12 +56,12 @@ typedef enum e_ws_opcode{
 }E_WS_OPCODE;
 #endif
 
-#define RANGE_NOTSET -1
+#define RANGE_NOTSET (size_t)-1
 
-/* 表示字符串形式键值对的链表结构体 */
+/* key value pair */
 typedef struct ST_HTTP_KVPAIR{
-	char *key; /* 标识 */
-	char *value; /* 解码后的内容 */
+	char *key; /* key */
+	char *value; /* value (decoded) */
 	struct ST_HTTP_KVPAIR *next;
 }HTTP_KVPAIR;
 
@@ -72,11 +72,11 @@ typedef struct ST_HTTP_RANGE{
 }HTTP_RANGE;
 
 typedef struct ST_HTTP_FILES{
-	char *key; /* 标识 */
-	char *fname; /* 文件名 */
-	char *ftype; /* 文件类型 */
-	unsigned char *fcontent; /* 存储文件内容，为节省内存空间，不单独为文件内容malloc */
-	unsigned int fsize; /* 文件大小 */
+	char *key; /* key */
+	char *fname; /* file name */
+	char *ftype; /* file type */
+	unsigned char *fcontent; /* file content, not malloc another space for less use ram */
+	unsigned int fsize; /* file size */
 	struct ST_HTTP_FILES *next;
 }HTTP_FILES;
 
@@ -92,31 +92,31 @@ typedef struct ST_HTTP_FD {
 	unsigned int recvbuf_space; /* space size of recvbuf */
 	unsigned int recvbuf_len; /* used space of recvbuf*/
 	unsigned int content_len; /* parsed Content-Length form http header, save it instead of parse header at every single recv */
-	unsigned int need_len; /* 消息还需要再接收的长度，初始为0 */
+	unsigned int need_len; /* data length that still need to recv, init 0 */
 	E_HTTP_STATE state; /* link state */
-	time_t tm_last_active; /* 连接的最后活动时间 */
-	time_t tm_last_req; /* 最后一个请求开始的时间 */
+	time_t tm_last_active; /* the time of last active */
+	time_t tm_last_req; /* the time of last request */
 	char *method; /* request method (GET/POST/HEAD/OPTIONS/PUT/..) */
 	char *path; /* request path (query info not included) */
 	char *http_version; /* http version (HTTP/1.1) */
-	struct ST_HTTP_KVPAIR *header_data; /* 请求的头域解析的结果 */
-	struct ST_HTTP_KVPAIR *cookie_data; /* parse cookie result */
+	struct ST_HTTP_KVPAIR *header_data; /* parsed head */
+	struct ST_HTTP_KVPAIR *cookie_data; /* parsed cookie */
 	struct ST_HTTP_RANGE *range_data; /* parsed range result */
-	struct ST_HTTP_KVPAIR *query_data; /* 请求的url中带的query信息解析的结果 */
-	struct ST_HTTP_KVPAIR *post_data; /* post数据解析的结果 */
-	struct ST_HTTP_FILES *file_data; /* 上传的文件解析的结果 */
+	struct ST_HTTP_KVPAIR *query_data; /* parsed query info included in url */
+	struct ST_HTTP_KVPAIR *post_data; /* parsed post info */
+	struct ST_HTTP_FILES *file_data; /* parsed file info */
 #ifdef WITH_SSL
-	SSL *ssl; /* 与客户端通信使用的SSL */
+	SSL *ssl; /* used SSL that comminute with peer */
 #endif
-	struct ST_HTTP_KVPAIR *cnf_header; /* 为响应消息设置的响应头的保存位置 */
-	E_HTTP_SEND_STATE send_state; /* 消息发送状态 */
-	TT_BUFFER response_head; /* header of response,  */
+	struct ST_HTTP_KVPAIR *cnf_header; /* saved content by call web_set_header */
+	E_HTTP_SEND_STATE send_state; /* sending state */
+	TT_BUFFER response_head; /* header of response */
 	TT_BUFFER response_entity; /* entity of response */
 #ifdef WITH_WEBSOCKET
-	TT_BUFFER ws_recvq; /* websocket接收队列，存储接收的未解包的原始数据，已解包的内容使用memmove移除，不能复用recvbuf(因为各键值对都依赖recvbuf的内容) */
-	TT_BUFFER ws_sendq; /* websocket发送队列，存储待发送的已封包的原始数据，已发送的内容使用memmove移除，不能和响应消息体共用response_entity */
-	TT_BUFFER ws_data; /* websocket接收的原始数据解包后的结果 */
-	TT_BUFFER ws_response; /* websocket待发送的原始数据封包前的结果 */
+	TT_BUFFER ws_recvq; /* recved raw (not decoded) data from websocket */
+	TT_BUFFER ws_sendq; /* packed data to send by websocket */
+	TT_BUFFER ws_data; /* decoded data from websocket */
+	TT_BUFFER ws_response; /* raw data that not packed to send by websocket */
 #endif
 	unsigned int sending_len; /* indicate the length header, entity or ws_sendq is sending, 0 means socket is idle. */
 	int (* send_cb)(struct ST_HTTP_FD *p_link);
@@ -187,7 +187,8 @@ extern int ws_pack(HTTP_FD *p_link, unsigned char opcode);
 #endif
 extern int set_pollingfunc(void (*pollingfunc)(void));
 extern int notify_web_getvalue(long int *len);
-extern int notify_web(const char *name, void *buf, unsigned int len);
+extern int sync_call(const char *name, void *payload, size_t payload_len);
+extern int notify_web(const char *name, void *payload, size_t payload_len, int (*callback)(int ret, void *arg), void *arg);
 
 #ifdef __cplusplus
 }

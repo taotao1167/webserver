@@ -5,8 +5,8 @@
 extern "C" {
 #endif
 
-extern void tt_sha1_bin(unsigned char *p_content, size_t len, unsigned char output[]);
-extern void tt_sha1_hex(unsigned char *p_content, size_t len, char output[]);
+extern void tt_sha1_bin(const void *p_content, size_t len, unsigned char output[]);
+extern void tt_sha1_hex(const void *p_content, size_t len, char output[]);
 
 #ifdef __cplusplus
 }

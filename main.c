@@ -7,6 +7,10 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/file.h>
+#endif
 #ifndef __TT_WEB_H__
 #include "tt_web.h"
 #endif
@@ -27,9 +31,8 @@
 
 pthread_t tWeb = 0;
 
-/* 初始化动作：各个线程的初始化动作(TODO) */
 int init_main() {
-	if (0 != init_webserver()) { /* web服务器初始化 */
+	if (0 != init_webserver()) { /* web server init */
 		return -1;
 	}
 	return 0;
@@ -38,59 +41,78 @@ int init_main() {
 #ifndef _WIN32
 int start_daemon() {
 	int ret = 0;
-	FILE *fp = NULL;
+	int fd = -1;
 	char pid[20] = {0};
-	fp = fopen(PIDFILE, "r");
-	if (fp != NULL) { /* 发现存在pid文件 */
-		fread(pid, sizeof(pid) - 1, 1, fp);
-		fclose(fp);
-		ret = kill((pid_t)atoi(pid), 0); /* 用kill函数发送信号0以检查进程是否存在，不是要结束进程 */
-		if (ret == -1) {
-			if (EPERM == errno) { /* 没有权限执行kill */
-				printf("check process failed. Permission denied.\n");
-				return -1;
-			} else if (ESRCH == errno) { /* 进程不存在 */
-				remove(PIDFILE);
-			}
-		} else { /* kill返回0说明进程还在正常运行 */
-			printf("already running.\n");
-			return -1;
-		}
+	struct flock fl;
+
+	fd = open(PIDFILE, O_RDWR | O_CREAT, 0600);
+	if (fd < 0) {
+		printf("open PIDFILE: %s.\n", strerror(errno));
+		return -1;
+	}
+	fl.l_type = F_WRLCK;
+	fl.l_start = 0;
+	fl.l_whence = SEEK_SET;
+	fl.l_len = 0;
+	ret = fcntl(fd, F_GETLK, &fl);
+	if (ret < 0) {
+		printf("get lock info: %s.\n", strerror(errno));
+		close(fd);
+		return -1;
+	}
+	if (fl.l_type != F_UNLCK) {
+		printf("already runnning, pid is %d.\n", fl.l_pid);
+		return -1;
 	}
 	printf("start process success.\n");
-	if (daemon(1, 0) == -1) { /* 执行daemon函数后程序就会切到后台运行，TODO */
+	if (daemon(1, 0) == -1) {
 		printf("execute daemon failed.\n");
 		return -1;
 	}
-	printf("execute daemon success.\n");
-	fp = fopen(PIDFILE, "w");
-	if (fp == NULL) {	/* pid文件没有写入权限 */
-		printf("open PIDFILE failed. Permission denied.\n");
+	fl.l_type = F_WRLCK;
+	fl.l_start = 0;
+	fl.l_whence = SEEK_SET;
+	fl.l_len = 0;
+	ret = fcntl(fd, F_SETLK, &fl);
+	if (ret < 0) {
+		printf("sef lock failed.\n");
+		close(fd);
 		return -1;
 	}
+	printf("execute daemon success.\n");
 	sprintf(pid, "%d", getpid());
-	fwrite(pid, strlen(pid), 1, fp);
-	fclose(fp);
+	ret = write(fd, pid, strlen(pid));
 	return 0;
 }
 
 int stop_daemon() {
 	int ret = 0;
-	FILE *fp = NULL;
-	char pid[20] = {0};
-	fp = fopen(PIDFILE, "r");
-	if (fp == NULL) {
-		printf("PIDFILE not found.\n");
+	int fd = -1;
+	struct flock fl;
+
+	fd = open(PIDFILE, O_RDONLY, 0600);
+	if (fd < 0) {
+		printf("open PIDFILE: %s.\n", strerror(errno));
 		return -1;
 	}
-	fread(pid, sizeof(pid) - 1, 1, fp);
-	ret = kill((pid_t)atoi(pid), SIGQUIT);
+	fl.l_type = F_WRLCK;
+	fl.l_start = 0;
+	fl.l_whence = SEEK_SET;
+	fl.l_len = 0;
+	ret = fcntl(fd, F_GETLK, &fl);
+	if (ret < 0) {
+		printf("get lock info: %s.\n", strerror(errno));
+		close(fd);
+		return -1;
+	}
+	if (fl.l_type == F_UNLCK) {
+		printf("process not running.\n");
+		return -1;
+	}
+	close(fd);
+	ret = kill(fl.l_pid, SIGINT);
 	if (ret == -1) {
-		if (EPERM == errno) {
-			printf("kill failed. Permission denied.\n");
-		} else if (ESRCH == errno) {
-			printf("process not running.\n");
-		}
+		printf("kill failed: %s.\n", strerror(errno));
 		return -1;
 	} else {
 		remove(PIDFILE);
@@ -108,16 +130,16 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 #endif
-	if (0 != init_main()) { /* 初始化 */
+	if (0 != init_main()) {
 		return -1;
 	}
 #ifndef _WIN32
 	if (0 == strcmp("start", argv[1])) {
-		if (0 != start_daemon()) {/* 将程序切换到后台运行 */
+		if (0 != start_daemon()) {
 			return -1;
 		}
 	} else if (0 == strcmp("debug", argv[1])) {
-		/* do nothing, 继续运行接下来的代码 */
+		/* do nothing */
 	} else if (0 == strcmp("stop", argv[1])) {
 		return stop_daemon();
 	} else {
@@ -130,6 +152,11 @@ int main(int argc, char **argv) {
 		printf("tWeb Create failed.\n");
 		return -1;
 	}
+	// while (1) {
+	// 	sleep(1);
+	// 	ret = sync_call("test", "hello, notify_web test.", strlen("hello, notify_web test."));
+	// 	printf("sync_call ret %d.\n", ret);
+	// }
 	pthread_join(tWeb, NULL);
 	return 0;
 }

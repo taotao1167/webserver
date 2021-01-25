@@ -26,7 +26,7 @@
 HTTP_SESSION *g_http_sessions = NULL;
 int g_session_count = 0;
 
-/* 往g_http_sessions中添加一个新的会话 */
+/* add new session to g_http_sessions */
 static HTTP_SESSION *append_session(const char *session_id, char *ip) {
 	HTTP_SESSION *new_session = NULL, *p_tail = NULL;
 	new_session = (HTTP_SESSION *)MY_MALLOC(sizeof(HTTP_SESSION));
@@ -81,8 +81,8 @@ int session_set_storage(HTTP_SESSION *p_session, const char *name, const char *v
 	if (!name || name[0] == '\0') {
 		return -1;
 	}
-	session_unset_storage(p_session, name); /* 如果有同名的删除后重新添加 */
-	/* 将键值对添加到p_session->storage链表末尾 */
+	session_unset_storage(p_session, name); /* cover the old data */
+	/* add information to p_session->storage */
 	p_new = (SESSION_STORAGE *)MY_MALLOC(sizeof(SESSION_STORAGE));
 	if (p_new == NULL) {
 		return -1;
@@ -103,7 +103,7 @@ int session_set_storage(HTTP_SESSION *p_session, const char *name, const char *v
 		MY_FREE(p_new);
 		return -1;
 	}
-	strcpy(p_new->value, value);
+	strcpy((char *)p_new->value, value);
 	if (p_session->storage == NULL) {
 		p_session->storage = p_new;
 	} else {
@@ -120,12 +120,12 @@ const char *session_get_storage(HTTP_SESSION *p_session, const char *key, const 
 	SESSION_STORAGE *p_cur = NULL;
 	for (p_cur = p_session->storage; p_cur != NULL; p_cur = p_cur->next) {
 		if (0 == strcmp(p_cur->key, key)) {
-			return p_cur->value;
+			return (char *)p_cur->value;
 		}
 	}
 	return default_value;
 }
-/* 释放键值对链表，同时释放链表键值对指向的空间 */
+/* free all items and it's space */
 int session_free_storage(SESSION_STORAGE **p_head) {
 	SESSION_STORAGE *p_cur = NULL, *p_next = NULL;
 	for (p_cur = *p_head; p_cur != NULL; p_cur = p_next) {
@@ -142,7 +142,7 @@ int session_free_storage(SESSION_STORAGE **p_head) {
 	return 0;
 }
 
-/* 释放会话下申请的所有资源 */
+/* free session and it's resource */
 static int session_free(HTTP_SESSION **p_session) {
 	if ((*p_session)->storage) {
 		session_free_storage(&((*p_session)->storage));
@@ -214,7 +214,7 @@ void session_timeout_check(void) {
 	}
 }
 
-/* 更新会话的超时时间 */
+/* update session time of expires */
 void update_session_expires(HTTP_FD *p_link) {
 	HTTP_SESSION *p_session = NULL;
 	time_t now;
@@ -228,7 +228,7 @@ void update_session_expires(HTTP_FD *p_link) {
 	}
 }
 
-/* 找到连接对应的会话，如果没有会话则为连接创建会话 */
+/* find the session of link, create if not found */
 int set_session(HTTP_FD *p_link) {
 	const char *session_id = NULL;
 	char str_temp[128], sha1_output[41];
@@ -247,7 +247,7 @@ int set_session(HTTP_FD *p_link) {
 		}
 	}
 	if (p_link->session == NULL) {
-		if (g_session_count >= HTTP_SESSION_MAX) {
+		if (HTTP_SESSION_MAX && g_session_count >= HTTP_SESSION_MAX) {
 			web_busy_response(p_link);
 			return 1;
 		} else {

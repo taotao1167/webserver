@@ -50,6 +50,9 @@
 #ifndef __TT_MSGQUEUE_H__
 #include "tt_msgqueue.h"
 #endif
+#ifndef __TT_SESSION_H__
+#include "tt_session.h"
+#endif
 
 #define emergency_printf(fmt,...) printf("%s %d: ", __func__, __LINE__);printf(fmt, ##__VA_ARGS__)
 //#define emergency_printf(fmt,...)
@@ -57,7 +60,7 @@
 //#define error_printf(fmt,...)
 #define notice_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
 //#define notice_printf(fmt, ...)
-#if 0  // 打印时间戳的宏定义，用于服务器性能优化
+#if 0  // print timestamp, for optimize server
 	#include <sys/time.h>
 	struct timeval g_tv;
 	#define debug_printf(fmt, ...) gettimeofday(&g_tv, NULL); printf("[%ld.%06ld] ", g_tv.tv_sec, g_tv.tv_usec); printf(fmt, ##__VA_ARGS__)
@@ -77,14 +80,14 @@
 #define MY_REALLOC(x, y) realloc((x), (y))
 #endif
 
-/* 表示状态码和状态字符串对应关系的结构体 */
+/* map status code and status string */
 typedef struct ST_HTTP_CODE_MAP {
 	const int code;
 	const char *status_text;
 	const char *entity;
 }HTTP_CODE_MAP;
 
-/* 表示MIME对应关系的结构体 */
+/* map mime type */
 typedef struct ST_HTTP_MIME_MAP {
 	const char *suffix;
 	const char *mime;
@@ -95,6 +98,22 @@ typedef enum E_HTTP_JUDGE {
 	JUDGE_CONTINUE,
 	JUDGE_ERROR
 }E_HTTP_JUDGE;
+
+typedef struct ST_HTTP_INNER_MSG {
+	char *name; /* message name */
+	int is_sync; /* 0 means async, not 0 means sync */
+	int (*callback)(int ret, void *arg); /* callback function, NULL means block */
+	void *arg; /* args of callback */
+	MSG_Q *resp_msgq; /* message queue for read return value of callback */
+	int ref_cnt; /* reference count of message queue */
+	void *payload; /* payload */
+	size_t payload_len; /* payload length */
+	struct ST_HTTP_INNER_MSG *next;
+}HTTP_INNER_MSG;
+
+typedef struct ST_HTTP_CALLBACK_RESPONSE {
+	int ret; /* return value of callback */
+}HTTP_CALLBACK_RESPONSE;
 
 #ifdef WITH_WEBSOCKET
 extern int ws_dispatch(HTTP_FD *p_link, E_WS_EVENT evt);
@@ -111,6 +130,7 @@ typedef enum E_WS_DECODE_RET {
 #endif
 
 extern int req_dispatch(HTTP_FD *p_link);
+extern int msg_dispatch(const char *name, void *buf, size_t len);
 extern void tt_handler_register();
 
 #ifdef WITH_SSL
@@ -120,12 +140,16 @@ SSL_CTX *g_default_ssl_ctx = NULL;
 struct event_base *g_event_base = NULL;
 WEB_SERVER *g_servers = NULL;
 HTTP_FD *g_http_links = NULL;
-static const char *g_hostname = "Border Collie"; /* 服务器名称，会出现在消息响应中 */
+evutil_socket_t g_msg_fd[2] = {0};
+
+static const char *g_hostname = "Border Collie"; /* Server Name, will show at response */
 static size_t g_init_recv_space = 1024; /* init length of HTTP_FD->recvbuf */
 static size_t g_max_head_len = 8192; /* max value allowed of the length of http header, default 8K(8192), 0 means no limit */
-static size_t g_max_entity_len = 104857600; /* max value allowed of the length of http entity, default 100M(104857600)，0 means no limit */
-static time_t g_max_active_interval = 0; /* 允许两次数据接收之间的最大时间间隔，单位秒，默认5秒，为0表示不限制 */
-static time_t g_recv_timeout = 0; /* 单个请求允许的最长时间，单位秒，默认60秒，为0表示不限制 */
+static size_t g_max_entity_len = 104857600; /* max value allowed of the length of http entity, default 100M(104857600), 0 means no limit */
+static time_t g_max_active_interval = 0; /* max interval allowed of the duration of recv, uint: second, default: 5, 0 means no limit */
+static time_t g_recv_timeout = 0; /* max duration allowed per request, unit: second, default: 60, 0 means no limit */
+static MSG_Q g_web_inner_msg; /* the msg queue of web server */
+static HTTP_INNER_MSG *g_web_inner_msg_head = NULL; /* the msgs that wait free, will be freed if ref == 0 */
 
 static const char *g_err_500_head = \
 	"HTTP/1.1 500 Internal Server Error\r\n"\
@@ -140,7 +164,7 @@ static const char *g_err_500_entity = \
 	"<html><h1>500 Internal Server Error</h1></html>";
 
 #ifdef WITH_SSL
-	char *g_default_ca_cert = \
+const char *g_default_ca_cert = \
 		"-----BEGIN CERTIFICATE-----\r\n"\
 		"MIIFpTCCA42gAwIBAgIJANte1W91z60qMA0GCSqGSIb3DQEBCwUAMGgxCzAJBgNV\r\n"\
 		"BAYTAlhYMQ0wCwYDVQQIDARYWFhYMQ0wCwYDVQQHDARYWFhYMR4wHAYDVQQKDBVY\r\n"\
@@ -174,7 +198,7 @@ static const char *g_err_500_entity = \
 		"kwROx3ui07BNf5z+Tru7LPT8407ryUihhuoN0xZQboLXxUcrRYJlWJzTGdNX7VDW\r\n"\
 		"YaP1oMTn4zcu\r\n"\
 		"-----END CERTIFICATE-----\r\n";
-	char *g_default_svr_cert = \
+const char *g_default_svr_cert = \
 		"-----BEGIN CERTIFICATE-----\r\n"\
 		"MIIFhjCCA26gAwIBAgIJAKdR9zy4dcd6MA0GCSqGSIb3DQEBCwUAMGgxCzAJBgNV\r\n"\
 		"BAYTAlhYMQ0wCwYDVQQIDARYWFhYMQ0wCwYDVQQHDARYWFhYMR4wHAYDVQQKDBVY\r\n"\
@@ -207,7 +231,7 @@ static const char *g_err_500_entity = \
 		"4uM3mT9xXRqWH5ZlkpRgKPDRF3ZTzfVwRTp+zLvHai4X+5ujHQBNkgRHORWVuDPl\r\n"\
 		"olcCJsG2mNv0PHagm/55B/WqTFMpFLMJ3dM=\r\n"\
 		"-----END CERTIFICATE-----\r\n";
-	char *g_default_privkey = \
+const char *g_default_privkey = \
 		"-----BEGIN RSA PRIVATE KEY-----\r\n"\
 		"MIIJKQIBAAKCAgEA9Y/HgQl7v0jsrXk+MORg/FG7FV1KFbAyJFlOlTQJxuaRbQyB\r\n"\
 		"o0xeKPFAweXOFxogmAK8XHC5rxWIfiQG7OfL3wkYq88A9tCHSTUGCBHQ94yYAgOO\r\n"\
@@ -262,7 +286,7 @@ static const char *g_err_500_entity = \
 #endif /* endof WITH_SSL */
 
 void hexdump(void *_buf, size_t size) {
-	unsigned char *buf = _buf;
+	unsigned char *buf = (unsigned char *)_buf;
 	size_t i = 0, offset = 0;
 	char tmp = '\0';
 	for (offset = 0; offset < size; offset += 16) {
@@ -377,7 +401,7 @@ static int urldecode(char *dst, const char *src) {
 	return 0;
 }
 
-/* 可能存在危险字符需要输出到页面上时需要转义，此函数只要调用过一次，dst都不释放，避免后续再次申请 */
+/* some danger character need escaped, do not need free dst to avoid malloc again */
 const char *htmlencode(const char * src) {
 	static char *dst = NULL;
 	static unsigned int dst_space = 0;
@@ -466,7 +490,7 @@ static int free_files(HTTP_FILES **p_head) {
 	return 0;
 }
 
-/* 获取头域中的内容，在p_link->header_data链表中没找到key时返回default_value */
+/* get information of header, return default_value if not found in p_link->header_data */
 const char *web_header_str(HTTP_FD *p_link, const char *key, const char *default_value) {
 	HTTP_KVPAIR *p_cur = NULL;
 	const char *p_keypos = NULL, *p_inkeypos = NULL;
@@ -476,7 +500,7 @@ const char *web_header_str(HTTP_FD *p_link, const char *key, const char *default
 		for (p_keypos = p_cur->key, p_inkeypos = key; ;p_keypos++, p_inkeypos++) {
 			if (*p_keypos == *p_inkeypos) {
 			} else if (isalpha(*p_keypos) && ((*p_keypos) & 0xdf) == ((*p_inkeypos) & 0xdf)) {
-				/* 同一字母的大小写形式必然相差0x20, 所以差的那一bit位不参与比较的话就必然是相等的 */
+				/* the diffrence between upper character and the lower is 0x20, so it will equal if not compare the diffrent bit */
 			} else if (*p_keypos == '-' && *p_inkeypos == '_') {
 			} else if (*p_keypos == '_' && *p_inkeypos == '-') {
 			} else {
@@ -494,7 +518,7 @@ const char *web_header_str(HTTP_FD *p_link, const char *key, const char *default
 	return default_value;
 }
 
-/* 获取头域中的内容，在p_link->cnf_header链表中没找到key时返回default_value */
+/* get information of headers defined by user, return default_value if not found in p_link->cnf_header */
 static const char *web_cnf_header_str(HTTP_FD *p_link, const char *key, const char *default_value) {
 	HTTP_KVPAIR *p_cur = NULL;
 	const char *p_keypos = NULL, *p_inkeypos = NULL;
@@ -504,7 +528,7 @@ static const char *web_cnf_header_str(HTTP_FD *p_link, const char *key, const ch
 		for (p_keypos = p_cur->key, p_inkeypos = key; ;p_keypos++, p_inkeypos++) {
 			if (*p_keypos == *p_inkeypos) {
 			} else if (isalpha(*p_keypos) && ((*p_keypos) & 0xdf) == ((*p_inkeypos) & 0xdf)) {
-				/* 同一字母的大小写形式必然相差0x20, 所以差的那一bit位不参与比较的话就必然是相等的 */
+				/* the diffrence between upper character and the lower is 0x20, so it will equal if not compare the diffrent bit */
 			} else if (*p_keypos == '-' && *p_inkeypos == '_') {
 			} else if (*p_keypos == '_' && *p_inkeypos == '-') {
 			} else {
@@ -522,7 +546,7 @@ static const char *web_cnf_header_str(HTTP_FD *p_link, const char *key, const ch
 	return default_value;
 }
 
-/* 获取query中的内容，在p_link->query_data链表中没找到key时返回default_value */
+/* get information of query, return default_value if not found in p_link->query_data */
 const char *web_query_str(HTTP_FD *p_link, const char *key, const char *default_value) {
 	HTTP_KVPAIR *p_cur = NULL;
 	for (p_cur = p_link->query_data; p_cur != NULL; p_cur = p_cur->next) {
@@ -533,7 +557,7 @@ const char *web_query_str(HTTP_FD *p_link, const char *key, const char *default_
 	return default_value;
 }
 
-/* 获取cookie中的内容，在p_link->cookie_data链表中没找到key时返回default_value */
+/* get information of cookie, return default_value if not found in p_link->cookie_data */
 const char *web_cookie_str(HTTP_FD *p_link, const char *key, const char *default_value) {
 	HTTP_KVPAIR *p_cur = NULL;
 	for (p_cur = p_link->cookie_data; p_cur != NULL; p_cur = p_cur->next) {
@@ -544,7 +568,7 @@ const char *web_cookie_str(HTTP_FD *p_link, const char *key, const char *default
 	return default_value;
 }
 
-/* 获取post中的内容，在p_link->post_data链表中没找到key时返回default_value */
+/* get information of post, return default_value if not found in p_link->post_data */
 const char *web_post_str(HTTP_FD *p_link, const char *key, const char *default_value) {
 	HTTP_KVPAIR *p_cur = NULL;
 	for (p_cur = p_link->post_data; p_cur != NULL; p_cur = p_cur->next) {
@@ -555,7 +579,7 @@ const char *web_post_str(HTTP_FD *p_link, const char *key, const char *default_v
 	return default_value;
 }
 
-/* 获取上传的文件内容，在p_link->file_data链表中没找到key时返回NULL，不为NULL时也不需要调用者释放 */
+/* get information of files uploaded by peer, return NULL if not found in p_link->file_data, do not free even return not NULL */
 const HTTP_FILES *web_file_data(HTTP_FD *p_link, const char *key) {
 	HTTP_FILES *p_cur = NULL;
 	for (p_cur = p_link->file_data; p_cur != NULL; p_cur = p_cur->next) {
@@ -566,12 +590,12 @@ const HTTP_FILES *web_file_data(HTTP_FD *p_link, const char *key) {
 	return NULL;
 }
 
-/* 通过调用此函数释放web_file_list获取的内容 */
+/* free information alloced by call web_file_list */
 int web_file_list_free(HTTP_FILES **p_head) {
 	return free_files(p_head);
 }
 
-/* 获取上传的多文件内容，返回一个新拷贝的链表，在p_link->file_data链表中没找到key时返回NULL，不为NULL时需要调用者调用web_file_list_free释放 */
+/* get information of multi files uploaded by peer, return NULL if not found in p_link->file_data, need caller free by call web_file_list_free */
 HTTP_FILES *web_file_list(HTTP_FD *p_link, const char *key) {
 	HTTP_FILES *p_cur = NULL;
 	HTTP_FILES *p_head = NULL, *p_new = NULL, *p_tail = NULL;
@@ -601,7 +625,7 @@ HTTP_FILES *web_file_list(HTTP_FD *p_link, const char *key) {
 	return p_head;
 }
 
-/* 解析上传的文件信息 */
+/* parse the information of files uploaded by peer */
 static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_entitylen, const char *p_boundary, E_HTTP_JUDGE *judge_result, int *http_code) {
 	char *p_boundary_start = NULL, *p_boundary_split = NULL, *p_boundary_end = NULL;
 	char *p_key = NULL, *p_value = NULL, *p_fkey = NULL, *p_fname = NULL, *p_ftype = NULL;
@@ -613,7 +637,7 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 	HTTP_KVPAIR *p_newdata = NULL, *p_taildata = NULL;
 	HTTP_FILES *p_newfile = NULL, *p_tailfile = NULL;
 
-	/* 先保存出各种boundary方便后续解析使用 */
+	/* save boundary for later use */
 	p_boundary_start = (char *)MY_MALLOC(strlen(p_boundary) + 5);
 	if (p_boundary_start == NULL) {
 		emergency_printf("malloc failed!\n");
@@ -651,9 +675,9 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 		goto exit_fn;
 	}
 	p_start = p_entity + strlen(p_boundary_start);
-	while (1) { /* 这个循环是为了遍历boundary分割的每一个部分 */
-		while (1) {/* 这个循环是为了从每一部分中提取文件名和文件类型 */
-			for (p_end = p_start; *p_end != '\0' && *p_end != ':'; p_end++);/* p_end指向冒号 */
+	while (1) { /* get part splited by boundary by this loop */
+		while (1) {/* get file name and file type from part by this loop */
+			for (p_end = p_start; *p_end != '\0' && *p_end != ':'; p_end++);/* p_end point to ':' */
 			if (*p_end != ':') {
 				notice_printf("':' not found at end of header define key.\n");
 				*judge_result = JUDGE_ERROR;
@@ -664,9 +688,9 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 			*p_end = '\0';
 			p_key = (char *)p_start;
 
-			for(p_start = p_end + 1; *p_start == ' ' || *p_start == '\t'; p_start++);/* 跳过冒号后的空格和制表，p_start指向value开头 */
+			for(p_start = p_end + 1; *p_start == ' ' || *p_start == '\t'; p_start++);/* skip SPACE and TAB after ':', p_start point to the start of value */
 
-			for (p_end = p_start; *p_end != '\0' && *p_end != '\r' && *p_end != '\n'; p_end++);/* 头定义的值中不可以包含换行，p_end指向行尾 */
+			for (p_end = p_start; *p_end != '\0' && *p_end != '\r' && *p_end != '\n'; p_end++);/* value exclue new line, p_end point to line end */
 			if (*p_end != '\r' || *(p_end + 1) != '\n') {
 				notice_printf("CRLF not found at end of multi header define value.\n");
 				*judge_result = JUDGE_ERROR;
@@ -680,7 +704,7 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 			debug_printf("multipart: '%s' => '%s'\n", p_key, p_value);
 			if (0 == strcasecmp(p_key, "Content-Disposition")) {
 				p_start_dis = p_value;
-				for (p_end_dis = p_start_dis; *p_end_dis != '\0' && *p_end_dis != ';'; p_end_dis++);/* Disposition-type以冒号结尾 */
+				for (p_end_dis = p_start_dis; *p_end_dis != '\0' && *p_end_dis != ';'; p_end_dis++);/* Disposition-type end with ':' */
 				if (*p_end_dis != ';') {
 					notice_printf("';' not found at end of Disposition-type.\n");
 					*judge_result = JUDGE_ERROR;
@@ -688,10 +712,10 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 					ret = -1;
 					goto exit_fn;
 				}
-				/* 跳过分号后的空格和制表 */
+				/* skip SPACE and TAB after ':' */
 				for(p_start_dis = p_end_dis + 1; *p_start_dis == ' ' || *p_start_dis == '\t'; p_start_dis++);
-				while (1) {/* 这个循环是为了解析Content-Disposition以提取key和文件名 */
-					for (p_end_dis = p_start_dis; *p_end_dis != '\0' && *p_end_dis != '='; p_end_dis++);/* p_end_dis指向'=' */
+				while (1) {/* get key and filename by parse Content-Disposition by this loop */
+					for (p_end_dis = p_start_dis; *p_end_dis != '\0' && *p_end_dis != '='; p_end_dis++);/* p_end_dis point to '=' */
 					if (*p_end_dis != '=' || *(p_end_dis + 1) != '\"') {
 						notice_printf("'=\"' not found at end of disposition key.\n");
 						*judge_result = JUDGE_ERROR;
@@ -702,8 +726,8 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 					*p_end_dis = '\0';
 
 					p_key_dis = p_start_dis;
-					p_start_dis = p_end_dis + 2; /* 跳过'=\"' */
-					for (p_end_dis = p_start_dis; *p_end_dis != '\0' && *p_end_dis != '\"'; p_end_dis++);/* p_end_dis指向'\"' */
+					p_start_dis = p_end_dis + 2; /* skip '=\"' */
+					for (p_end_dis = p_start_dis; *p_end_dis != '\0' && *p_end_dis != '\"'; p_end_dis++);/* p_end_dis point to '\"' */
 					if (*p_end_dis != '\"') {
 						notice_printf("'\"' not found at end of disposition value.\n");
 						*judge_result = JUDGE_ERROR;
@@ -721,10 +745,10 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 					} else if (0 == strcasecmp(p_key_dis, "filename")) {
 						p_fname = p_value_dis;
 						p_value_dis = NULL;
-					} else {/* 不关注的字段，直接跳过解析下一个 */
+					} else {/* the key does matter, skip it to parse next */
 					}
 					if (*(p_end_dis + 1) == ';') {
-						/* 跳过分号后的空格和制表 */
+						/* skip SPACE and TAB after ';' */
 						for(p_start_dis = p_end_dis + 2; *p_start_dis == ' ' || *p_start_dis == '\t'; p_start_dis++);
 					} else {
 						break;
@@ -733,7 +757,7 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 			} else if (0 == strcasecmp(p_key, "Content-Type")) {
 				p_ftype = p_value;
 				p_value = NULL;
-			} else {/* 不关注的字段，直接跳过解析下一个 */
+			} else {/* the key does matter, skip it to parse next */
 			}
 			if (*(p_end + 2) == '\r' && *(p_end + 3) == '\n') {
 				p_start = p_end + 4;
@@ -742,10 +766,10 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 				p_start = p_end + 2;
 			}
 		}
-		isend = 0; /* 标记是否整个entity都已解析完成 */
+		isend = 0; /* mark all entity is parsed or not */
 		p_end = p_start;
 		p_entityend = p_entity + u_entitylen;
-		while (1) {/* 这个循环是为了找到文件内容结尾 */
+		while (1) {/* get the file end by this loop */
 			boundary_match = 1;
 			for (i = 0; i < boundary_split_len; i++) {
 				if (*(p_end + i) != *(p_boundary_split + i)) {
@@ -782,7 +806,7 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 				p_end++;
 			}
 		}
-		if (p_fname != NULL) { /* 有没有文件名可以判断是否是文件，如果传的是文件，放到p_link->file_data中 */
+		if (p_fname != NULL) { /* put file into p_link->file_data if is file */
 			p_newfile = (HTTP_FILES *)MY_MALLOC(sizeof(HTTP_FILES));
 			if (p_newfile == NULL) {
 				emergency_printf("malloc failed!\n");
@@ -798,7 +822,7 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 			p_fname = NULL;
 			p_newfile->ftype = p_ftype;
 			p_ftype = NULL;
-			p_fcontent[fsize] = '\0'; /* 文件也以'\0'结尾，避免获取上传的文本时需要重新malloc和copy */
+			p_fcontent[fsize] = '\0'; /* file end with '\0' too, avoid malloc again and copy for text file */
 			p_newfile->fcontent = p_fcontent;
 			p_fcontent = NULL;
 			p_newfile->fsize = fsize;
@@ -810,7 +834,7 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 			}
 			p_tailfile = p_newfile;
 			p_newfile = NULL;
-		} else { /* 传的是普通数据，放到p_link->post_data中 */
+		} else { /* put data into p_link->post_data if is not file */
 			p_newdata = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
 			if (p_newdata == NULL) {
 				emergency_printf("malloc failed!\n");
@@ -857,7 +881,7 @@ exit_fn:
 	return ret;
 }
 
-/* 解析http消息，解析过程中会改变recvbuf的内容作为键值对列表的参数池 */
+/* parse http message, recvbuf will changed to be argumeng pool while parse */
 static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code) {
 	char *p_key = NULL, *p_value = NULL, *p_start = NULL, *p_end = NULL, *p_range_start = NULL, *p_range_end = NULL;
 	char *p_req_url = NULL, *p_query = NULL, *p_contype = NULL, *p_boundary = NULL, *p_cookie = NULL, *p_range = NULL;
@@ -868,7 +892,7 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 	int is_multipart = 0, is_over = 0;
 
 	p_start = (char *)p_link->recvbuf;
-	for (p_end = p_start; *p_end != ' ' && *p_end != '\0'; p_end++);/* p_end指向方法结尾 */
+	for (p_end = p_start; *p_end != ' ' && *p_end != '\0'; p_end++);/* p_end point to the end of method */
 	if (*p_end != ' ') {
 		notice_printf("SP not found at end of method.\n");
 		*judge_result = JUDGE_ERROR;
@@ -876,10 +900,10 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 		return -1;
 	}
 	*p_end = '\0';
-	p_link->method = p_start; /* 获取到method */
+	p_link->method = p_start; /* get method */
 
 	p_start = p_end + 1;
-	for (p_end = p_start; *p_end != ' ' && *p_end != '\0'; p_end++);/* p_end指向url结尾 */
+	for (p_end = p_start; *p_end != ' ' && *p_end != '\0'; p_end++);/* p_end point to the end of url */
 	if (*p_end != ' ') {
 		notice_printf("SP not found at end of url.\n");
 		*judge_result = JUDGE_ERROR;
@@ -887,10 +911,10 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 		return -1;
 	}
 	*p_end = '\0';
-	p_req_url = p_start; /* 获取到req_url */
+	p_req_url = p_start; /* get req_url */
 
 	p_start = p_end + 1;
-	for (p_end = p_start; *p_end != '\r' && *p_end != '\n' && *p_end != '\0'; p_end++);/* p_end指向http版本号结尾 */
+	for (p_end = p_start; *p_end != '\r' && *p_end != '\n' && *p_end != '\0'; p_end++);/* p_end point to the end of http version */
 	if (*p_end != '\r' || *(p_end + 1) != '\n') {
 		notice_printf("CRLF not found at end of version.\n");
 		*judge_result = JUDGE_ERROR;
@@ -898,14 +922,14 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 		return -1;
 	}
 	*p_end = '\0';
-	p_link->http_version = p_start; /* 获取到http_version */
+	p_link->http_version = p_start; /* get http_version */
 	p_start = p_end + 2;
 
 	if (0 == strcmp(p_start, "\r\n")) {
 		p_start += 2;
 	} else {
 		while (1) {
-			for (p_end = p_start; *p_end != ':' && *p_end != '\0'; p_end++);/* p_end指向key结尾 */
+			for (p_end = p_start; *p_end != ':' && *p_end != '\0'; p_end++);/* p_end point to the end of key */
 			if (*p_end != ':') {
 				notice_printf("':' not found at end of header define key.\n");
 				*judge_result = JUDGE_ERROR;
@@ -915,9 +939,9 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			*p_end = '\0';
 			p_key = p_start;
 
-			for (p_start = p_end + 1; *p_start == ' ' || *p_start == '\t'; p_start++);/* 跳过冒号后的空格和制表 */
+			for (p_start = p_end + 1; *p_start == ' ' || *p_start == '\t'; p_start++); /* skip SPACE and TAB after ':' */
 
-			for (p_end = p_start; *p_end != '\r' && *p_end != '\n' && *p_end != '\0'; p_end++);/* p_end指向value结尾 */
+			for (p_end = p_start; *p_end != '\r' && *p_end != '\n' && *p_end != '\0'; p_end++);/* p_end point to ehd end of value */
 			if (*p_end != '\r' || *(p_end + 1) != '\n') {
 				notice_printf("CRLF not found at end of header define value.\n");
 				*judge_result = JUDGE_ERROR;
@@ -927,7 +951,7 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			*p_end = '\0';
 			p_value = p_start;
 
-			/* 得到的键值对添加到p_link->header_data链表中 */
+			/* add pair to p_link->header_data */
 			p_new = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
 			if (p_new == NULL) {
 				emergency_printf("malloc failed!\n");
@@ -953,24 +977,24 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			}
 		}
 	}
-	p_entity = (unsigned char *)p_start;/* 先保存一下当前位置，解析entity的时候需要用到 */
+	p_entity = (unsigned char *)p_start;/* save current position, will be used when parse entity */
 	u_entitylen = p_link->recvbuf + p_link->recvbuf_len - p_entity;
-	for (p_start = p_end = p_req_url; *p_end != '\0' && *p_end != '?'; p_end++);/* p_end指向path的结束位置 */
+	for (p_start = p_end = p_req_url; *p_end != '\0' && *p_end != '?'; p_end++);/* p_end point to the end of path */
 	if (*p_end == '?') {
 		*p_end = '\0';
-		p_end++;/* skip '?', 跳过问号，因为锚信息不会传给服务器，后面的内容都只可能是query参数 */
+		p_end++;/* skip '?', point to the start of query */
 		p_query = p_end;
 	}
 
 	p_link->path = p_start;
 	urldecode(p_link->path, p_link->path);
 	path_merge(p_link->path, p_link->path);
-	/* 如果有query字符串的话开始解析query字符串，填充query_data */
+	/* parse query, save information to p_link->query_data */
 	p_start = p_query;
 	if (p_start != NULL) {
 		is_over = 0;
 		while (1) {
-			for (p_end = p_start; *p_end != '\0' && *p_end != '='; p_end++);/* p_end指向等号 */
+			for (p_end = p_start; *p_end != '\0' && *p_end != '='; p_end++);/* p_end point to '=' */
 			if (*p_end != '=') {
 				debug_printf("'=' not found at end of query key.\n");
 				break;
@@ -978,8 +1002,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			*p_end = '\0';
 			p_key = p_start;
 
-			p_start = p_end + 1; /* 跳过'=' */
-			for (p_end = p_start; *p_end != '\0' && *p_end != '&'; p_end++);/* p_end指向'&'或'\0' */
+			p_start = p_end + 1; /* skip '=' */
+			for (p_end = p_start; *p_end != '\0' && *p_end != '&'; p_end++);/* p_end point to '&' or '\0' */
 			if (*p_end != '&') {
 				is_over = 1;
 			}
@@ -987,7 +1011,7 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			urldecode(p_start, p_start);
 			p_value = p_start;
 
-			/* 得到的键值对添加到p_link->query_data链表中 */
+			/* add pair to p_link->query_data */
 			p_new = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
 			if (p_new == NULL) {
 				emergency_printf("malloc failed!\n");
@@ -1008,7 +1032,7 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 
 			if (!is_over) {
 				*p_end = '\0';
-				p_start = p_end + 1; /* 遇到'&'说明后面还有内容，跳过'&'继续解析 */
+				p_start = p_end + 1; /* get '&' means not complete yet, skip '&' and continue */
 				continue;
 			} else {
 				break;
@@ -1016,13 +1040,13 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 		}
 	}
 
-	/* 如果有cookie的话开始解析cookie，填充cookie_data */
+	/* parse cookie, save information to p_link->cookie_data */
 	p_cookie = (char *)web_header_str(p_link, "Cookie", NULL);
 	if (p_cookie != NULL) {
 		is_over = 0;
 		p_start = p_cookie;
 		while (1) {
-			for (p_end = p_start; *p_end != '\0' && *p_end != '='; p_end++);/* p_end指向等号 */
+			for (p_end = p_start; *p_end != '\0' && *p_end != '='; p_end++);/* p_end point to '=' */
 			if (*p_end != '=') {
 				notice_printf("'=' not found at end of cookie key.\n");
 				*judge_result = JUDGE_ERROR;
@@ -1032,15 +1056,15 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			*p_end = '\0';
 			p_key = p_start;
 
-			p_start = p_end + 1; /* 跳过'=' */
-			for (p_end = p_start; *p_end != '\0' && *p_end != ';'; p_end++);/* p_end指向';'或'\0' */
+			p_start = p_end + 1; /* skip '=' */
+			for (p_end = p_start; *p_end != '\0' && *p_end != ';'; p_end++);/* p_end point to ';' or '\0' */
 			if (*p_end != ';') {
 				is_over = 1;
 			}
 			*p_end = '\0';
 			p_value = p_start;
 
-			/* 得到的键值对添加到p_link->cookie_data链表中 */
+			/* add pair to p_link->cookie_data */
 			p_new = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
 			if (p_new == NULL) {
 				emergency_printf("malloc failed!\n");
@@ -1059,7 +1083,7 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			}
 			p_tail = p_new;
 
-			if (!is_over) { /* 遇到';'说明后面还有内容，跳过';'和后续空白字符继续解析 */
+			if (!is_over) { /* get ';' means not complete yet, skip ';' and ' ' and continue */
 				p_end++;
 				while (*p_end == ' ' || *p_end == '\t') {
 					p_end++;
@@ -1153,7 +1177,7 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 		}
 	}
 
-	/* 如果有entity内容的话开始解析entity内容，填充entity_data和file_data */
+	/* parse entity if entity not null, save information to p_link->post_data and p_link->file_data */
 	if (p_entity[0] != '\0') {
 		if (0 == p_link->content_len) {
 			notice_printf("no content.\n");
@@ -1182,7 +1206,7 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			is_over = 0;
 			p_start = (char *)p_entity;
 			while (1) {
-				for (p_end = p_start; *p_end != '\0' && *p_end != '='; p_end++);/* p_end指向等号 */
+				for (p_end = p_start; *p_end != '\0' && *p_end != '='; p_end++);/* p_end point to '=' */
 				if (*p_end != '=') {
 					notice_printf("'=' not found at end of post key.\n");
 					*judge_result = JUDGE_ERROR;
@@ -1192,8 +1216,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 				*p_end = '\0';
 				p_key = p_start;
 
-				p_start = p_end + 1; /* 跳过'=' */
-				for (p_end = p_start; *p_end != '\0' && *p_end != '&'; p_end++);/* p_end指向'&'或'\0' */
+				p_start = p_end + 1; /* skip '=' */
+				for (p_end = p_start; *p_end != '\0' && *p_end != '&'; p_end++);/* p_end point to '&' or '\0' */
 				if (*p_end != '&') {
 					is_over = 1;
 				}
@@ -1201,7 +1225,7 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 				urldecode(p_start, p_start);
 				p_value = p_start;
 
-				/* 得到的键值对添加到p_link->post_data链表中 */
+				/* save information to p_link->post_data */
 				p_new = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
 				if (p_new == NULL) {
 					emergency_printf("malloc failed!\n");
@@ -1221,7 +1245,7 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 				p_tail = p_new;
 
 				if (!is_over) {
-					p_start = p_end + 1; /* 遇到'&'说明后面还有内容，跳过'&'继续解析 */
+					p_start = p_end + 1; /* get '&' means not complete yet, skip '&' and continue */
 					continue;
 				} else {
 					break;
@@ -1232,7 +1256,7 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 	return 0;
 }
 
-/* 判断一个http请求是否完整，如果已经接收完整就调用parse_http把消息解析了 */
+/* judge http request is complete or not, call parse_http to get information if is complete */
 static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code) {
 	char p_key[16], p_value[16], *p_headend = NULL;
 	const char *p_start = NULL, *p_end = NULL;
@@ -1252,13 +1276,13 @@ static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code
 	}
 	head_len = p_headend - (char *)(p_link->recvbuf);
 	if (strncmp((char *)(p_link->recvbuf), "GET ", 4) && p_link->content_len == 0) {
-		/* 如果是get请求或之前已经解析出Content-Length都不需要再解析 */
+		/* parse again is unnecessary if method is GET or Content-Length is parsed */
 		p_start = strstr((char *)p_link->recvbuf, "\r\n");
 		if (p_start != p_headend) {
 			p_start += 2;
 			*p_headend = '\0';
 			while (1) {
-				for (p_end = p_start; *p_end != ':' && *p_end != '\0'; p_end++);/* 找冒号 */
+				for (p_end = p_start; *p_end != ':' && *p_end != '\0'; p_end++);/* find ':' */
 				if (*p_end == '\0') {
 					*http_code = 400;
 					*judge_result = JUDGE_ERROR;
@@ -1268,8 +1292,8 @@ static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code
 					memcpy(p_key, p_start, 14);
 					p_key[14] = '\0';
 					if (0 == strcasecmp(p_key, "Content-Length")) {
-						for (p_start = p_end + 1; *p_start == ' ' || *p_start == '\t'; p_start++);/* 找非空白字符 */
-						for (p_end = p_start; *p_end != '\r' && *p_end != '\0'; p_end++);/* 找行尾 */
+						for (p_start = p_end + 1; *p_start == ' ' || *p_start == '\t'; p_start++);/* find SPACE or TAB */
+						for (p_end = p_start; *p_end != '\r' && *p_end != '\0'; p_end++);/* find line end */
 						if (p_end - p_start > 10) {
 							*http_code = 413;
 							*judge_result = JUDGE_ERROR;
@@ -1278,13 +1302,13 @@ static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code
 						memcpy(p_value, p_start, p_end - p_start);
 						*(p_value + (p_end - p_start)) = '\0';
 						p_link->content_len = (unsigned int)atoi(p_value);
-						/* 找到Content-Length退出 */
+						/* exit if Content-Length is founded */
 						if (g_max_entity_len && p_link->content_len > g_max_entity_len) {
 							*http_code = 413;
 							*judge_result = JUDGE_ERROR;
 							goto exit_fn;
 						}
-						/* 既然得到了Content-Length，整个消息大小确定，一次realloc申请足够的空间，避免多次realloc */
+						/* get Content-Length, the size of request is clear, realloc enough space to avoid realloc again */
 						if (p_link->recvbuf_space < p_link->content_len + (head_len + 4) + 1) {
 							p_link->recvbuf_space = p_link->content_len + (head_len + 4) + 1;
 							p_link->recvbuf = (unsigned char *)MY_REALLOC(p_link->recvbuf, p_link->recvbuf_space);
@@ -1298,10 +1322,10 @@ static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code
 						break;
 					}
 				}
-				for (p_end = p_start; *p_end != '\r' && *p_end != '\0'; p_end++);/* 找行尾 */
+				for (p_end = p_start; *p_end != '\r' && *p_end != '\0'; p_end++);/* find line end */
 
 				if (*p_end == '\0') {
-					/* 没找到Content-Length退出 */
+					/* exit if Content-Length is not founded */
 					break;
 				} else {
 					if (0 == strncmp(p_end, "\r\n", 2)) {
@@ -1338,7 +1362,7 @@ exit_fn:
 	if (head_len) {
 		*(p_link->recvbuf + head_len) = '\r';
 	}
-	if (is_complete) { /* 如果消息已经接收结束了就直接开始解析 */
+	if (is_complete) { /* start parse if request is complete */
 		p_link->state = STATE_RESPONSING;
 		debug_printf("before parse_http\n");
 		parse_http(p_link, judge_result, http_code);
@@ -1347,14 +1371,14 @@ exit_fn:
 	return 0;
 }
 
-/* 设置http消息头字段 */
+/* configure http header of response */
 int web_set_header(HTTP_FD *p_link, const char *name, const char *value) {
 	HTTP_KVPAIR *p_new = NULL, *p_tail = NULL;
 
 	if (!name || name[0] == '\0') {
 		return -1;
 	}
-	/* 将键值对添加到p_link->cnf_header链表末尾 */
+	/* save information to p_link->cnf_header */
 	p_new = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
 	if (p_new == NULL) {
 		emergency_printf("malloc failed!\n");
@@ -1391,7 +1415,7 @@ int web_set_header(HTTP_FD *p_link, const char *name, const char *value) {
 	return 0;
 }
 
-/* 取消对http消息头字段的设置 */
+/* cancel the configuration of http header */
 int web_unset_header(HTTP_FD *p_link, const char *name) {
 	HTTP_KVPAIR *p_pre = NULL, *p_cur = NULL, *p_next = NULL;
 	const char *p_keypos = NULL, *p_inkeypos = NULL;
@@ -1407,7 +1431,7 @@ int web_unset_header(HTTP_FD *p_link, const char *name) {
 		for (p_keypos = p_cur->key, p_inkeypos = name; ;p_keypos++, p_inkeypos++) {
 			if (*p_keypos == *p_inkeypos) {
 			} else if (isalpha(*p_keypos) && ((*p_keypos) & 0xdf) == ((*p_inkeypos) & 0xdf)) {
-				/* 同一字母的大小写形式必然相差0x20, 所以差的那一bit位不参与比较的话就必然是相等的 */
+				/* the diffrence between upper character and the lower is 0x20, so it will equal if not compare the diffrent bit */
 			} else if (*p_keypos == '-' && *p_inkeypos == '_') {
 			} else if (*p_keypos == '_' && *p_inkeypos == '-') {
 			} else {
@@ -1596,7 +1620,7 @@ int web_fin(HTTP_FD *p_link, int http_code) {
 		tt_buffer_no_copy(&(p_link->response_head), (unsigned char *)g_err_500_head, strlen(g_err_500_head), 0, 0);
 		tt_buffer_no_copy(&(p_link->response_entity), (unsigned char *)g_err_500_entity, strlen(g_err_500_entity), 0, 0);
 	} else {
-		/* 根据状态码找到状态字符串，如果不是HEAD请求调用者又没指定消息体，而code_map中刚好定义了，顺便设置消息体 */
+		/* find status by response code, auto generate entity if method is not HEAD and entify is undefined by user but found in code_map */
 		for (i = 0; code_map[i].code != -1; i++) {
 			if (http_code != code_map[i].code) {
 				continue;
@@ -1607,14 +1631,14 @@ int web_fin(HTTP_FD *p_link, int http_code) {
 			}
 			break;
 		}
-		/* 存入http版本，响应状态码，状态字符串 */
+		/* generate http version, response code and status */
 		tt_buffer_printf(&(p_link->response_head), "HTTP/1.1 %d %s\r\n", http_code, status_text);
 		for (i = 0; hfields[i][0] != NULL; i++) {
 			p_value = web_cnf_header_str(p_link, hfields[i][0], "");
-			if (p_value == NULL) { /* NULL表示要删除这个字段 */
+			if (p_value == NULL) { /* NULL means need remove */
 				web_unset_header(p_link, hfields[i][0]);
 				continue;
-			} else if (p_value[0] == '\0') { /* 空字符串表示未对这个字段进行修改 */
+			} else if (p_value[0] == '\0') { /* "" means not modified by user */
 				if (0 == strcasecmp(hfields[i][0], "Content-Length")) {
 					tt_buffer_printf(&(p_link->response_head), "Content-Length: %" SIZET_FMT "\r\n", p_link->response_entity.used);
 				} else if (0 == strcasecmp(hfields[i][0], "Content-Type")) {
@@ -1646,18 +1670,18 @@ int web_fin(HTTP_FD *p_link, int http_code) {
 		}
 		tt_buffer_printf(&(p_link->response_head), "\r\n");
 	}
-	/* 如果只是HEAD请求，去掉消息体 */
+	/* remove entity if method is HEAD */
 	if (p_link->method != NULL && 0 == strcmp(p_link->method, "HEAD")) {
 		p_link->response_entity.used = 0;
 	}
-	if (p_link->state != STATE_CLOSED) { /* 避免把异步回调关闭的连接再激活 */
+	if (p_link->state != STATE_CLOSED) { /* should not active again after closed */
 		p_link->state = STATE_SENDING;
 	}
 	p_link->send_state = SENDING_HEAD;
 	return 0;
 }
 
-/* 返回服务器繁忙的响应 */
+/* response server is busy */
 int web_busy_response(HTTP_FD *p_link) {
 	web_printf(p_link, "<h1>Server is too busy!</h1>");
 	web_set_header(p_link, "Retry-After", "5");
@@ -1666,7 +1690,7 @@ int web_busy_response(HTTP_FD *p_link) {
 	return 0;
 }
 #ifdef WITH_SSL
-/* 从内存中加载证书 */
+/* load certificate from memory */
 static X509 *load_certificate_mem(const char *cert_b64) {
 	BIO *bio_in = NULL;
 	X509 *x509 = NULL;
@@ -1681,7 +1705,7 @@ static X509 *load_certificate_mem(const char *cert_b64) {
 	return x509;
 }
 
-/* 获取证书密码的回调函数，如果不定义，就会默认使用PEM_def_callback，容易卡在Enter PEM pass phrase: */
+/* define the callback of get password, or will use default callback PEM_def_callback and will block at "Enter PEM pass phrase:" */
 static int my_pem_password_cb(char *buf, int num, int w, void *key) {
 	if (key == NULL) {
 		return -1;
@@ -1690,7 +1714,7 @@ static int my_pem_password_cb(char *buf, int num, int w, void *key) {
 	}
 }
 
-/* 加载base64编码的私钥 */
+/* load private key that base64 encoded */
 static EVP_PKEY *load_privatekey_mem(const char *key_b64, const char *password) {
 	BIO *bio_in = NULL;
 	EVP_PKEY *pkey = NULL;
@@ -1705,7 +1729,7 @@ static EVP_PKEY *load_privatekey_mem(const char *key_b64, const char *password) 
 	return pkey;
 }
 
-/* 获取颁发者名称 */
+/* get issuer name of certificate */
 static const char *get_x509_issuer_name(X509 *x509, const char *key){
 	X509_NAME_ENTRY *ent = NULL;
 	const ASN1_STRING *val = NULL;
@@ -1738,7 +1762,7 @@ static const char *get_x509_issuer_name(X509 *x509, const char *key){
 	return (const char *)buf;
 }
 
-/* 获取使用者名称 */
+/* get subject name of certificate */
 static const char *get_x509_subject_name(X509 *x509, const char *key){
 	X509_NAME_ENTRY *ent = NULL;
 	const ASN1_STRING *val = NULL;
@@ -1771,7 +1795,7 @@ static const char *get_x509_subject_name(X509 *x509, const char *key){
 	return (const char *)buf;
 }
 
-/* 获取有效期起始时间 */
+/* get the time of start of certificate */
 static const char *get_x509_notBefore(X509 *x509){
 	static char buf[256];
 	BIO *bio_out = BIO_new(BIO_s_mem());
@@ -1785,7 +1809,7 @@ static const char *get_x509_notBefore(X509 *x509){
 	return (const char *)buf;
 }
 
-/* 获取有效期结束时间 */
+/* get the time of end of certificate */
 static const char *get_x509_notAfter(X509 *x509){
 	static char buf[256];
 	BIO *bio_out = BIO_new(BIO_s_mem());
@@ -1830,6 +1854,7 @@ static int SSL_CTX_use_certificate_mem(SSL_CTX *ssl_ctx, const char *pem_cert) {
 		emergency_printf("read x509 failed.\n");
 		return -1;
 	}
+	cert_info_print(x509);
 	if (SSL_CTX_use_certificate(ssl_ctx, x509) <= 0) {
 		emergency_printf("import certificate failed.\n");
 		ret = -1;
@@ -1854,7 +1879,7 @@ static int SSL_CTX_use_PrivateKey_mem(SSL_CTX *ssl_ctx, const char *privkey, con
 	return ret;
 }
 
-/* 创建SSL会话环境，成功返回可用的会话环境，失败返回NULL */
+/* create SSL context, return NULL if failed */
 SSL_CTX *create_ssl_ctx(const char *svr_cert, const char *privkey, const char *password) {
 	SSL_CTX *ssl_ctx = NULL;
 	int ret = 0;
@@ -1895,15 +1920,6 @@ exit_fn:
 	return ssl_ctx;
 }
 #endif /* endof WITH_SSL */
-int init_event_base() {
-	g_event_base = event_base_new();
-	if (g_event_base == NULL) {
-		emergency_printf("event_base_new failed.\n");
-		return -1;
-	}
-	return 0;
-}
-
 static int reset_link_for_continue(HTTP_FD *p_link) {
 	p_link->recvbuf_len = 0;
 	p_link->content_len = 0;
@@ -1934,10 +1950,10 @@ static int reset_link_for_continue(HTTP_FD *p_link) {
 	if (p_link->cnf_header) {
 		free_kvpair_deep(&(p_link->cnf_header));
 	}
-	p_link->send_state = 0;
+	p_link->send_state = SENDING_HEAD;
 	p_link->response_head.used = 0;
 	p_link->response_entity.used = 0;
-	if (p_link->recvbuf_space >= 8192) { /* free it if space > 8K, call malloc again if need */
+	if (p_link->recvbuf_space >= 8192) { /* free it if space > 8K, call malloc again if necessary */
 		if (p_link->recvbuf) {
 			MY_FREE(p_link->recvbuf);
 			p_link->recvbuf = NULL;
@@ -2156,22 +2172,22 @@ static E_WS_DECODE_RET ws_unpack(HTTP_FD *p_link) {
 	buf = p_link->ws_recvq.content;
 	fin = buf[0] & 0x80;
 	opcode = buf[0] & 0x0f;
-	/* opcode: 0x1是文本，0x2是二进制, 0x8是关闭连接, 0x9是心跳ping，0xA是心跳pong */
+	/* opcode: 0x1: Text, 0x2: binary, 0x8: close connection, 0x9: ping, 0xA: pong */
 	if (opcode == 0x08) {
 		return WS_DECODE_CLOSED;
 	}
-	if (!(buf[1] & 0x80)) { /* 客户端数据必须带mask */
+	if (!(buf[1] & 0x80)) { /* data must be masked from client to server */
 		return WS_DECODE_ERROR;
 	}
 	payload_len = buf[1] & 0x7f;
-	if (payload_len == 126) { /* 16bit的扩展长度 */
-		if (p_link->ws_recvq.used <= 125 + 8) { /* 用上了16bit payload length 说明数据量超过125, 目前已到第4字节，再加后续4字节mask */
+	if (payload_len == 126) { /* extended payload length is 16 bit */
+		if (p_link->ws_recvq.used <= 125 + 8) { /* payload length is bigger the 125 if use 16 bit, 2+2 bytes (parsed) + 4 bytes (mask) */
 			return WS_DECODE_NEEDMORE;
 		}
 		payload_len = buf[2] << 8 | buf[3] << 1;
 		buf += 4;
-	} else if (payload_len == 127) {
-		if (p_link->ws_recvq.used <= 65535 + 14) { /* 用上了64bit payload length 说明数据量超过65535, 目前已到第10字节，再加后续4字节mask */
+	} else if (payload_len == 127) { /* extended payload length is 64 bit */
+		if (p_link->ws_recvq.used <= 65535 + 14) { /* payload length is bigger the 65535 if use 64 bit, 2+8 bytes (parsed) + 4 bytes (mask) */
 			return WS_DECODE_NEEDMORE;
 		}
 		payload_len = ((size_t)buf[2] << 56) | ((size_t)buf[3] << 48) | ((size_t)buf[4] << 40) | ((size_t)buf[5] << 32)\
@@ -2186,7 +2202,7 @@ static E_WS_DECODE_RET ws_unpack(HTTP_FD *p_link) {
 		return WS_DECODE_NEEDMORE;
 	}
 	pre_datalen = p_link->ws_data.used;
-	tt_buffer_write(&(p_link->ws_data), buf, payload_len); /* 先拷贝进去，再统一解码 */
+	tt_buffer_write(&(p_link->ws_data), buf, payload_len); /* copy into ws_data, decode together */
 	plain_tail = p_link->ws_data.content + p_link->ws_data.used;
 	for (i = 0, plain = p_link->ws_data.content + pre_datalen; plain < plain_tail; plain++, i++) {
 		*plain ^= mask[i%4];
@@ -2197,7 +2213,7 @@ static E_WS_DECODE_RET ws_unpack(HTTP_FD *p_link) {
 	if (p_link->ws_recvq.used > 0) {
 		return WS_DECODE_AGAIN;
 	}
-	if (!fin) { /* FIN 没有置位 */
+	if (!fin) { /* FIN is not set */
 		if (opcode == WS_OPCODE_CONTINUATION) {
 			return WS_DECODE_CHUNKED;
 		} else {
@@ -2270,7 +2286,7 @@ static int upgrade_websocket(HTTP_FD *p_link) {
 	return 0;
 }
 int ws_handshake(HTTP_FD *p_link) {
-	char *ws_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+	const char *ws_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 	const char *header_connection = NULL, *header_upgrade = NULL, *header_secwskey = NULL;
 	unsigned char sha1_output[20];
 	char *str_temp = NULL, *b64_str = NULL;
@@ -2304,7 +2320,6 @@ int ws_handshake(HTTP_FD *p_link) {
 	}
 	return -1;
 }
-#endif
 
 static void ws_read(HTTP_FD *p_link) {
 	struct evbuffer *input = NULL;
@@ -2331,7 +2346,7 @@ static void ws_read(HTTP_FD *p_link) {
 			p_link->ws_data.content[0] = '\0';
 			p_link->ws_data.used = 0;
 		} else if (decode_ret == WS_DECODE_CLOSED) {
-			/* ws_dispatch(p_link, EVENT_ONCLOSE); EVENT_ONCLOSE 在当前ws_read退出后检测 */
+			/* ws_dispatch(p_link, EVENT_ONCLOSE); EVENT_ONCLOSE will detected after ws_read returned */
 			p_link->state = STATE_CLOSED;
 			break;
 		} else if (decode_ret == WS_DECODE_ERROR) {
@@ -2352,6 +2367,7 @@ static void ws_read(HTTP_FD *p_link) {
 	} while (decode_ret == WS_DECODE_AGAIN);
 	return;
 }
+#endif
 
 static void read_cb_web(struct bufferevent *bev, void *user_data) {
 	HTTP_FD *p_link = (HTTP_FD *)user_data;
@@ -2359,19 +2375,25 @@ static void read_cb_web(struct bufferevent *bev, void *user_data) {
 	p_link->tm_last_active = time(0);
 	if (p_link->state == STATE_RECVING) {
 		http_read(p_link);
-	} else if (p_link->state == STATE_WS_CONNECTED) {
+	} 
+#ifdef WITH_WEBSOCKET
+	else if (p_link->state == STATE_WS_CONNECTED) {
 		ws_read(p_link);
 		if (p_link->state == STATE_CLOSED) {
 			ws_dispatch(p_link, EVENT_ONCLOSE);
 		}
 	}
+#endif
 	apply_change(p_link);
 	return;
 }
 
 static void write_cb_web(struct bufferevent *bev, void *user_data) {
 	struct evbuffer *output = NULL;
-	size_t sndq_len = 0, write_len = 0;
+	size_t sndq_len = 0;
+#ifdef WITH_WEBSOCKET
+	size_t write_len = 0;
+#endif
 	HTTP_FD *p_link = (HTTP_FD *)user_data;
 
 	p_link->tm_last_active = time(0);
@@ -2383,7 +2405,9 @@ static void write_cb_web(struct bufferevent *bev, void *user_data) {
 	if (sndq_len != 0) {
 		return;
 	}
+#ifdef WITH_WEBSOCKET
 	write_len = p_link->sending_len;
+#endif
 	p_link->sending_len = 0;
 	if (p_link->state == STATE_SENDING || p_link->state == STATE_CLOSING
 #ifdef WITH_WEBSOCKET
@@ -2415,6 +2439,142 @@ static void write_cb_web(struct bufferevent *bev, void *user_data) {
 	apply_change(p_link);
 	return;
 }
+
+static int msg_queue_check() {
+	int ret = 0;
+	HTTP_INNER_MSG *p_inner = NULL, *p_pre = NULL, *p_next = NULL;
+	HTTP_CALLBACK_RESPONSE *response = NULL;
+
+	p_pre = NULL;
+	p_next = NULL;
+	/* clear msg that msgq_ref == 0 */
+	for (p_inner = g_web_inner_msg_head; p_inner != NULL; p_inner = p_next) {
+		p_next = p_inner->next;
+		if (p_inner->ref_cnt == 0) {
+			if (p_inner->resp_msgq != NULL) {
+				msgq_destroy(p_inner->resp_msgq);
+				MY_FREE(p_inner->name);
+				MY_FREE(p_inner->resp_msgq);
+			}
+			MY_FREE(p_inner);
+			if (p_pre != NULL) {
+				p_pre->next = p_next;
+			} else {
+				g_web_inner_msg_head = p_next;
+			}
+		} else {
+			p_pre = p_inner;
+		}
+	}
+	while (1) {
+		p_inner = (HTTP_INNER_MSG *)msg_tryget(&g_web_inner_msg);
+		if (p_inner == NULL) {
+			break;
+		}
+		ret = msg_dispatch(p_inner->name, p_inner->payload, p_inner->payload_len);
+		if (p_inner->is_sync) {
+			response = (HTTP_CALLBACK_RESPONSE *)MY_MALLOC(sizeof(HTTP_CALLBACK_RESPONSE));
+			if (response == NULL) {
+				emergency_printf("malloc failed.\n");
+			} else {
+				response->ret = ret;
+				msg_put(p_inner->resp_msgq, response);
+			}
+		} else {
+			if (p_inner->callback) {
+				p_inner->callback(ret, p_inner->arg);
+			}
+		}
+		p_inner->next = NULL;
+		if (g_web_inner_msg_head == NULL) {
+			g_web_inner_msg_head = p_inner;
+		} else {
+			for (p_pre = g_web_inner_msg_head; p_pre->next != NULL; p_pre = p_pre->next);
+			p_pre->next = p_inner;
+		}
+	}
+	return 0;
+}
+
+int notify_web_getvalue(long int *len) {
+	return msg_getvalue(&g_web_inner_msg, len);
+}
+static int inner_call(const char *name, void *payload, size_t payload_len, int is_sync, int (*callback)(int ret, void *arg), void *arg) {
+	int ret = 0;
+	struct timespec tmout;
+	HTTP_INNER_MSG *p_inner = NULL;
+	HTTP_CALLBACK_RESPONSE *response = NULL;
+
+	p_inner = (HTTP_INNER_MSG *)MY_MALLOC(sizeof(HTTP_INNER_MSG));
+	if (p_inner == NULL) {
+		emergency_printf("malloc for p_inner failed.");
+		ret = -1;
+		goto exit;
+	}
+	memset(p_inner, 0x00, sizeof(HTTP_INNER_MSG));
+	p_inner->is_sync = is_sync;
+	if (!is_sync) {
+		p_inner->callback = callback;
+		p_inner->arg = arg;
+	}
+	p_inner->ref_cnt = 1;
+	if (name != NULL) {
+		p_inner->name = (char *)MY_MALLOC(strlen(name) + 1);
+		if (p_inner->name == NULL) {
+			emergency_printf("malloc for p_inner->name failed.");
+			ret = -1;
+			goto exit;
+		}
+		strcpy(p_inner->name, name);
+	} else {
+		p_inner->name = NULL;
+	}
+	p_inner->payload = payload;
+	p_inner->payload_len = payload_len;
+	if (is_sync) {
+		p_inner->resp_msgq = (MSG_Q *)MY_MALLOC(sizeof(MSG_Q));
+		msgq_init(p_inner->resp_msgq, 0);
+		if (0 != msg_put(&g_web_inner_msg, p_inner)) {
+			emergency_printf("msg_put failed.\n");
+			ret = -1;
+			goto exit;
+		}
+		if (p_inner->resp_msgq == NULL) {
+			ret = 0;
+			goto exit;
+		}
+		write(g_msg_fd[1], "0", 1);
+		tmout.tv_sec = 1; /* timeout in 1 second */
+		tmout.tv_nsec = 0;
+		response = (HTTP_CALLBACK_RESPONSE *)msg_timedget(p_inner->resp_msgq, &tmout);
+		if (response == NULL) {
+			printf("msg_timedget timeout, webserver is busy or dead.\n");
+			ret = -1;
+			goto exit;
+		}
+		ret = response->ret;
+		MY_FREE(response);
+	}
+exit:
+	if (p_inner != NULL) {
+		p_inner->ref_cnt -= 1;
+	}
+	return ret;
+}
+/* block until msg_dispatch complete or timeout, return callback return value or -1 if timeout */
+int sync_call(const char *name, void *payload, size_t payload_len) {
+	return inner_call(name, payload, payload_len, 1, NULL, NULL);
+}
+/* return immediately, callback will be called when msg_dispatch complete */
+int notify_web(const char *name, void *payload, size_t payload_len, int (*callback)(int ret, void *arg), void *arg) {
+	return inner_call(name, payload, payload_len, 0, callback, arg);
+}
+void msg_cb_web(evutil_socket_t fd, short event, void *user_data) {
+	unsigned char tmp = 0;
+	while (read(fd, &tmp, 1) > 0);
+	msg_queue_check();
+}
+
 void listen_cb_web(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *addr, int socklen, void *user_data) {
 	int ret = -1;
 	WEB_SERVER *server = (WEB_SERVER *)user_data;
@@ -2480,7 +2640,7 @@ void listen_cb_web(struct evconnlistener *listener, evutil_socket_t fd, struct s
 	bufferevent_setcb(new_link->bev, read_cb_web, write_cb_web, event_cb_web, new_link);
 	bufferevent_enable(new_link->bev, EV_READ);
 	bufferevent_disable(new_link->bev, EV_WRITE);
-	debug_printf("link from [%s]:%d.\n", new_link->ip, new_link->port);
+	debug_printf("link from [%s]:%d.\n", new_link->ip_peer, new_link->port_peer);
 
 	new_link->prev = NULL;
 	new_link->next = g_http_links;
@@ -2502,7 +2662,7 @@ static void timer_cb_web(evutil_socket_t fd, short event, void *user_data) {
 	time_t tm_now, tm_last_active, tm_last_req;
 
 	tm_now = time(0);
-	debug_printf("now: %ld\n", tm_now);
+	// debug_printf("now: %ld\n", tm_now);
 	tm_last_active = (tm_now > g_max_active_interval) ? (tm_now - g_max_active_interval) : 0;
 	tm_last_req = (tm_now > g_recv_timeout) ? (tm_now - g_recv_timeout) : 0;
 	for (p_curlink = g_http_links; p_curlink != NULL; p_curlink = p_next) {
@@ -2519,7 +2679,6 @@ static void timer_cb_web(evutil_socket_t fd, short event, void *user_data) {
 			apply_change(p_curlink);
 		}
 	}
-	
 	session_timeout_check();
 }
 int destroy_server(WEB_SERVER *p_svr) {
@@ -2652,13 +2811,38 @@ WEB_SERVER *create_https(const char *name, int ip_version, unsigned short port, 
 }
 #endif
 int web_server_run() {
+	struct event msg_ev;
 	struct event time_ev;
 	struct timeval tv;
 
-#ifndef _WIN32
-	signal(SIGPIPE, SIG_IGN);
+	g_event_base = event_base_new();
+	if (g_event_base == NULL) {
+		emergency_printf("event_base_new failed.\n");
+		return -1;
+	}
+	event_assign(&time_ev, g_event_base, -1, EV_PERSIST, timer_cb_web, NULL);
+	evutil_timerclear(&tv);
+	tv.tv_sec = 1;
+	event_add(&time_ev, &tv);
+
+#ifdef _WIN32
+#define LOCAL_SOCKETPAIR_AF AF_INET
+#else
+#define LOCAL_SOCKETPAIR_AF AF_UNIX
 #endif
-	init_event_base();
+	msgq_init(&g_web_inner_msg, 0);
+	if (evutil_socketpair(LOCAL_SOCKETPAIR_AF, SOCK_STREAM, 0, g_msg_fd) != 0) {
+		printf("evutil_socketpair failed.\n");
+		goto exit;
+	}
+	evutil_make_socket_nonblocking(g_msg_fd[0]);
+	evutil_make_socket_nonblocking(g_msg_fd[1]);
+	event_assign(&msg_ev, g_event_base, g_msg_fd[0], EV_READ | EV_PERSIST, msg_cb_web, NULL);
+	if (event_add(&msg_ev, NULL) < 0) {
+		printf("event_add failed.\n");
+		goto exit;
+	}
+
 	create_http("default", 4, 20080, ".");
 #ifdef WITH_IPV6
 	create_http("default", 6, 20080, NULL);
@@ -2670,16 +2854,15 @@ int web_server_run() {
 	create_https("default", 6, 20443, NULL, g_default_ssl_ctx);
 #endif
 #endif /* WITH_SSL */
-	event_assign(&time_ev, g_event_base, -1, EV_PERSIST, timer_cb_web, NULL);
-	evutil_timerclear(&tv);
-	tv.tv_sec = 1;
-	event_add(&time_ev, &tv);
 	event_base_dispatch(g_event_base);
 	if (g_event_base) {
 		event_base_free(g_event_base);
 	}
+exit:
+#ifdef WITH_SSL
 	SSL_CTX_free(g_default_ssl_ctx);
 	g_default_ssl_ctx = NULL;
+#endif
 	return 0;
 }
 int init_webserver() {
@@ -2708,14 +2891,17 @@ int init_webserver() {
 	if (-1 == init_tree_info(fcontent, fsize)) {
 		return -1; 
 	}
-	tt_handler_register(); // 注册所有url对应的回调函数
+	tt_handler_register();
+
+#ifndef _WIN32
+	signal(SIGPIPE, SIG_IGN);
+#endif
 	return 0;
 }
 
 void *web_server_thread(void *para) {
-	web_server_run(); // 启动web服务器
+	web_server_run(); // run web server
 	pthread_exit(NULL);
 	return NULL;
 }
-
 

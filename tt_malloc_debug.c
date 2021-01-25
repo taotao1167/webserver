@@ -19,7 +19,7 @@ void *my_malloc(size_t size, const char *func, int line) {
 	if (ptr == NULL) {
 		printf("%s,%d: malloc %u failed.\n", func, line, (unsigned int)size);
 	} else {
-		memcpy(ptr + size, RAM_TAIL, 4);
+		memcpy((unsigned char *)ptr + size, RAM_TAIL, 4);
 		p_new = (RAM_RECORD *)malloc(sizeof(RAM_RECORD));
 		if (p_new == NULL) {
 			printf("%s,%d: malloc for record failed.\n", __func__, __LINE__);
@@ -54,7 +54,7 @@ void my_free(void *ptr, const char *func, int line) {
 			} else {
 				p_pre->next = p_next;
 			}
-			if (0 != memcmp(ptr + p_cur->size, RAM_TAIL, 4)) {
+			if (0 != memcmp((unsigned char *)ptr + p_cur->size, RAM_TAIL, 4)) {
 				printf("%s,%d: free overflow heap %p alloc at func %s,%d\n", func, line, ptr, p_cur->func, p_cur->line);
 			}
 			debug_printf("%s,%d: free heap %p(%uB).\n", func, line, ptr, (unsigned int)p_cur->size);
@@ -85,7 +85,7 @@ void *my_realloc(void *ptr, size_t size, const char *func, int line) {
 			} else {
 				p_pre->next = p_next;
 			}
-			if (0 != memcmp(ptr + p_cur->size, RAM_TAIL, 4)) {
+			if (0 != memcmp((unsigned char *)ptr + p_cur->size, RAM_TAIL, 4)) {
 				printf("%s,%d: realloc invalid heap %p alloc at func %s,%d\n", func, line, ptr, p_new->func, p_new->line);
 			}
 			free(p_cur);
@@ -101,7 +101,7 @@ void *my_realloc(void *ptr, size_t size, const char *func, int line) {
 	if (ptr_new == NULL) {
 		printf("%s,%d: realloc %u failed.\n", func, line, (unsigned int)size);
 	} else {
-		memcpy(ptr_new + size, RAM_TAIL, 4);
+		memcpy((unsigned char *)ptr_new + size, RAM_TAIL, 4);
 		p_new = (RAM_RECORD *)malloc(sizeof(RAM_RECORD));
 		if (p_new == NULL) {
 			printf("%s,%d: realloc for record failed.\n", __func__, __LINE__);

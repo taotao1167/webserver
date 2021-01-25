@@ -19,10 +19,10 @@
 #define f3(b,c,d) ((b) ^ (c) ^ (d))
 
 typedef struct ST_TT_SHA1_CTX{
-	unsigned int h[5]; // 初始状态
-	unsigned int msg_len; // 消息总长度
-	unsigned int buf_len; // 未处理部分数据大小
-	unsigned char buf[64]; // 保存未处理部分数据
+	unsigned int h[5]; // init state
+	size_t msg_len; // length of message
+	size_t buf_len; // length of untreated message
+	unsigned char buf[64]; // untreated message
 }TT_SHA1_CTX;
 
 static void tt_sha1_init(TT_SHA1_CTX *ctx) {
@@ -34,7 +34,7 @@ static void tt_sha1_init(TT_SHA1_CTX *ctx) {
 	ctx->buf_len = ctx->msg_len = 0;
 }
 
-static void tt_sha1_calcgroup(TT_SHA1_CTX *ctx, unsigned char *pos) {
+static void tt_sha1_calcgroup(TT_SHA1_CTX *ctx, const unsigned char *pos) {
 	unsigned int a = 0, b = 0, c = 0, d = 0, e = 0, temp = 0;
 	unsigned int w[80] = {0}, i = 0;
 	for (i = 0; i < 16; i++) {
@@ -60,12 +60,12 @@ static void tt_sha1_calcgroup(TT_SHA1_CTX *ctx, unsigned char *pos) {
 	ctx->h[0] += a; ctx->h[1] += b; ctx->h[2] += c; ctx->h[3] += d; ctx->h[4] += e;
 }
 
-static void tt_sha1_update(TT_SHA1_CTX *ctx, unsigned char *p_content, size_t len) {
-	unsigned char *pos = NULL;
+static void tt_sha1_update(TT_SHA1_CTX *ctx, const void *p_content, size_t len) {
+	const unsigned char *pos = NULL;
 	if (ctx->buf_len) {
-		if (ctx->buf_len + len >= 64) { // buf中原本的内容与新加的内容凑成一组
+		if (ctx->buf_len + len >= 64) { // get one group by combine buf and new content
 			memcpy(ctx->buf + ctx->buf_len, p_content, 64 - ctx->buf_len);
-			p_content += 64 - ctx->buf_len;
+			p_content = (unsigned char *)p_content + 64 - ctx->buf_len;
 			len -= 64 - ctx->buf_len;
 			pos = ctx->buf;
 			ctx->buf_len = 0;
@@ -77,18 +77,18 @@ static void tt_sha1_update(TT_SHA1_CTX *ctx, unsigned char *p_content, size_t le
 			return;
 		}
 	} else {
-		pos = p_content;
+		pos = (const unsigned char *)p_content;
 		ctx->msg_len += len;
 	}
-	for (; len >= 64; len -= 64) { // 凑满一个分组就直接计算
+	for (; len >= 64; len -= 64) { // calc if get entire group
 		tt_sha1_calcgroup(ctx, pos);
 		if (pos == ctx->buf) {
-			pos = p_content;
+			pos = (const unsigned char *)p_content;
 		} else {
 			pos += 64;
 		}
 	}
-	if (len) {// 剩下的内容不够一组，保存到buf中
+	if (len) {// save to buf if untreated message not enough for a group
 		memcpy(ctx->buf + ctx->buf_len, p_content, len);
 		ctx->buf_len += len;
 	}
@@ -96,7 +96,7 @@ static void tt_sha1_update(TT_SHA1_CTX *ctx, unsigned char *p_content, size_t le
 
 static void tt_sha1_final(TT_SHA1_CTX *ctx, unsigned char output[]) {
 	unsigned char *pos = NULL;
-	int i = 0;
+	unsigned long int i = 0;
 
 	memset(ctx->buf + ctx->buf_len, 0x00, 64 - ctx->buf_len);
 	*(ctx->buf + ctx->buf_len) = 0x80;
@@ -111,7 +111,7 @@ static void tt_sha1_final(TT_SHA1_CTX *ctx, unsigned char output[]) {
 	*pos++ = (ctx->msg_len >> 5) & 0xff;
 	*pos++ = (ctx->msg_len << 3) & 0xff;
 	tt_sha1_calcgroup(ctx, ctx->buf);
-	for (i = 0; i < sizeof(ctx->h)/sizeof(unsigned int); i++) {
+	for (i = 0; i < sizeof(ctx->h) / sizeof(unsigned int); i++) {
 		output[i << 2] = ctx->h[i] >> 24;
 		output[(i << 2) + 1] = (ctx->h[i] >> 16) & 0xff;
 		output[(i << 2) + 2] = (ctx->h[i] >> 8) & 0xff;
@@ -119,15 +119,15 @@ static void tt_sha1_final(TT_SHA1_CTX *ctx, unsigned char output[]) {
 	}
 }
 
-void tt_sha1_bin(unsigned char *p_content, size_t len, unsigned char output[]) {
+void tt_sha1_bin(const void *p_content, size_t len, unsigned char output[]) {
 	TT_SHA1_CTX ctx;
 	tt_sha1_init(&ctx);
 	tt_sha1_update(&ctx, p_content, len);
 	tt_sha1_final(&ctx, output);
 }
-void tt_sha1_hex(unsigned char *p_content, size_t len, char hex_output[]) {
+void tt_sha1_hex(const void *p_content, size_t len, char hex_output[]) {
 	unsigned char output[20];
-	int i = 0;
+	size_t i = 0;
 
 	tt_sha1_bin(p_content, len, output);
 	hex_output[0] = '\0';

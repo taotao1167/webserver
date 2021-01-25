@@ -6,36 +6,35 @@ extern "C" {
 #endif
 
 #ifndef HTTP_SESSION_ID_MAX_LEN
-#define HTTP_SESSION_ID_MAX_LEN 40 /*session_id最大长度*/
+#define HTTP_SESSION_ID_MAX_LEN 40 /* max length of session_id */
 #endif
 #ifndef HTTP_SESSION_MAX_HOLD
-#define HTTP_SESSION_MAX_HOLD 60 /* 离线会话保持时长，单位秒，默认60秒 */
+#define HTTP_SESSION_MAX_HOLD 60 /* hold duration of offline session, uint: seconds, default: 60 */
 #endif
 #ifndef HTTP_SESSION_TIMEOUT
-#define HTTP_SESSION_TIMEOUT 300 /* 已登陆会话超时时长，单位秒，默认300秒 */
+#define HTTP_SESSION_TIMEOUT 300 /* hold duration of online session, uint: seconds, default: 300 */
 #endif
 #ifndef HTTP_SESSION_MAX
-#define HTTP_SESSION_MAX 100 /* 最大session数量，默认100 */
+#define HTTP_SESSION_MAX 0 /* max count of session, 0 means no limit, default: 0 */
 #endif
 
-/* 某一会话存储的信息键值对链表结构体 */
 typedef struct ST_SESSION_STORAGE{
-	char *key; /* 标识 */
-	void *value; /* 存储的内容 */
+	char *key;
+	void *value;
 	struct ST_SESSION_STORAGE *next;
 }SESSION_STORAGE;
 
-/* 会话结构体 */
+/* struct of session */
 typedef struct ST_HTTP_SESSION{
 	char session_id[HTTP_SESSION_ID_MAX_LEN + 1];
-	char ip[48]; /* 客户端IP地址 */
-	unsigned char isonline; /* 会话是否已登陆 */
-	time_t create_time; /* 会话创建时间 */
-	time_t login_time; /* 会话登陆时间 */
-	time_t active_time; /* 会话最后活动时间 */
-	time_t heartbeat_expire; /* 心跳超时时间 */
-	time_t expire; /* 会话超时时间 */
-	struct ST_SESSION_STORAGE *storage; /* 会话数据存储位置 */
+	char ip[48]; /* ip address of client */
+	unsigned char isonline; /* is online or not */
+	time_t create_time; /* time of create */
+	time_t login_time; /* time of login */
+	time_t active_time; /* time of last active */
+	time_t heartbeat_expire; /* time of heartbeat expire */
+	time_t expire; /* time of expire */
+	struct ST_SESSION_STORAGE *storage; /* saved data of session */
 	struct ST_HTTP_SESSION *next;
 }HTTP_SESSION;
 

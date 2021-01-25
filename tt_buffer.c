@@ -69,7 +69,7 @@ int tt_buffer_swapto_malloced(TT_BUFFER *buffer, size_t content_len) {
 				return -1;
 			}
 			memcpy(buffer->content, buf_bak, buffer->used);
-			*(buffer->content + buffer->used) = '\0'; /* 为兼容字符串，最后需要以'\0结尾' */
+			*(buffer->content + buffer->used) = '\0'; /* must be end with '\0' for compatible with string */
 		} else {
 			buffer->content = (unsigned char *)MY_MALLOC(buffer->space);
 			if (buffer->content == NULL) {
@@ -120,7 +120,7 @@ int main() {
 	printf("%s\n", content);
 	return 0;
 }
-上面这段代码windows上执行结果：
+windows result:
 ret: 6
 AAAAAA
 ret: 5
@@ -131,7 +131,7 @@ ret: -1
 DDDDXXXXX
 ret: -1
 EEXXXXXXX
-linux上执行结果
+linux result:
 ret: 6
 AAAAAA
 ret: 5
@@ -177,8 +177,8 @@ int tt_buffer_vprintf(TT_BUFFER *buffer, const char *format, va_list args) {
 #else
 	/* linux */
 	rc = vsnprintf((char *)buffer->content + buffer->used, buffer->space - buffer->used, format, args);
-	if (buffer->used + (size_t)rc + 1 > buffer->space) { /* 需要使用的空间大小是rc + 1字节的'\0' */
-		/* 需要写入的内容长度超过剩余空间，没写入完整，重新分配内存后重新写入 */
+	if (buffer->used + (size_t)rc + 1 > buffer->space) { /* need space size is rc + 1('\0') */
+		/* need space large then free space, realloc and rewrite */
 		while (buffer->used + (size_t)rc + 1 > buffer->space) {
 			buffer->space <<= 1;
 		}
@@ -218,7 +218,7 @@ int tt_buffer_write(TT_BUFFER *buffer, const void *content, size_t content_len) 
 			return -1;
 		}
 	}
-	/* 需要写入的内容长度超过剩余空间，重新分配内存后写入 */
+	/* need space large then free space, realloc and rewrite */
 	if (buffer->used + content_len + 1 > buffer->space) {
 		while (buffer->used + content_len + 1 > buffer->space) {
 			buffer->space <<= 1;
@@ -232,7 +232,7 @@ int tt_buffer_write(TT_BUFFER *buffer, const void *content, size_t content_len) 
 	}
 	memcpy(buffer->content + buffer->used, content, content_len);
 	buffer->used += content_len;
-	*(buffer->content + buffer->used) = '\0'; /* 为兼容字符串，最后需要以'\0结尾' */
+	*(buffer->content + buffer->used) = '\0';  /* must be end with '\0' for compatible with string */
 	return 0;
 }
 
@@ -243,14 +243,14 @@ int tt_buffer_no_copy(TT_BUFFER *buffer, void *content, size_t used, size_t spac
 	}
 	if (buffer->is_malloced) {
 		if (buffer->used) {
-			/* 如果buffer中本身已经有内容，则自动变为调用tt_buffer_write */
+			/* buffer has content already, auto change to call tt_buffer_write */
 			ret = tt_buffer_write(buffer, content, used);
 			if (is_malloced) {
 				MY_FREE(content);
 			}
 			return ret;
 		} else {
-			/* buffer申请了空间，但没使用，就可以释放 */
+			/* buffer has space but not used, free it */
 			tt_buffer_free(buffer);
 		}
 	}

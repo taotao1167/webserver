@@ -91,7 +91,7 @@ int http_cgi_menu(HTTP_FD *p_link) {
 }
 int http_cgi_signin(HTTP_FD *p_link) {
 	const char *retCode = "null";
-#if 1  /* TODO: 关闭这个登陆通道 */
+#if 1  /* TODO: disable the way to signin */
 	const char *uname = NULL;
 	uname = web_post_str(p_link, "uname", "");
 	if (uname[0] != '\0') {
@@ -140,7 +140,7 @@ int http_test_upload(HTTP_FD *p_link) {
 	TT_FILE *ram_file = NULL;
 	HTTP_FILES *p_upfile_list = NULL, *p_cur_upfile = NULL;
 	if (0 == strcmp(p_link->method, "POST")) {
-		/* 页面控件只允许选择单个文件时可以直接获取 */
+		/* use web_file_data if just one file */
 		web_printf(p_link, "{\"retCode\":[\"success\"],");
 		p_upfile = web_file_data(p_link, "file1");
 		if (p_upfile != NULL) {
@@ -155,7 +155,7 @@ int http_test_upload(HTTP_FD *p_link) {
 			}
 		}
 
-		/* 页面控件如果允许选择多个文件则需要先获取链表，用完后释放 */
+		/* use web_file_list and web_file_list_free if multiple file */
 		web_printf(p_link, "\"file2\":[");
 		p_upfile_list = web_file_list(p_link, "file2");
 		for (p_cur_upfile = p_upfile_list; p_cur_upfile != NULL; p_cur_upfile = p_cur_upfile->next) {
@@ -175,7 +175,7 @@ int http_test_upload(HTTP_FD *p_link) {
 		web_file_list_free(&p_upfile_list);
 		web_printf(p_link, "],");
 
-		/* 普通post数据获取方式依旧使用web_post_str获取 */
+		/* unchanged web_post_str for normal data */
 		web_printf(p_link, "\"entry1\":\"%s\"}", htmlencode(web_post_str(p_link, "entry1", "")));
 
 		p_upfile = web_file_data(p_link, "file3");
@@ -215,11 +215,11 @@ int http_test_upload_large(HTTP_FD *p_link) {
 		if (p_upfile != NULL) {
 			if (p_upfile->fname[0] != '\0') {
 				/*printf("upload:\"%s\", type:\"%s\", size:%u Bytes\n",
-					p_upfile->fname, p_upfile->ftype, p_upfile->fsize); *//* 【TODO】 调试时的打印，调试完成后去掉 */
+					p_upfile->fname, p_upfile->ftype, p_upfile->fsize); *//* TODO print while debug, annotate is if debug is complete */
 				if (file_offset == 0) {
-					fp = fopen("web_upload.tmp", "wb"); /* 通常应该根据文件hash来创建文件 */
+					fp = fopen("web_upload.tmp", "wb"); /* create cache file by hash value usually */
 				} else {
-					fp = fopen("web_upload.tmp", "ab"); /* 缓存文件后面追加新内容 */
+					fp = fopen("web_upload.tmp", "ab"); /* append new content after chche file */
 				}
 				if (fp != NULL) {
 #ifdef _WIN32
@@ -230,11 +230,11 @@ int http_test_upload_large(HTTP_FD *p_link) {
 					file_stored = ftell(fp);
 #endif
 					if (file_stored == file_offset) {
-						wret = fwrite(p_upfile->fcontent, p_upfile->fsize, 1, fp); /* 接受到的内容写入文件 */
+						wret = fwrite(p_upfile->fcontent, p_upfile->fsize, 1, fp); /* write conntent to file */
 						if (wret == 1) {
 							file_stored += p_upfile->fsize;
 						} else {
-							printf("write file failed\n"); /* 写文件失败的处理 */
+							printf("write file failed\n"); /* what to if write file is failed */
 						}
 					}
 					fclose(fp);
@@ -248,7 +248,7 @@ int http_test_upload_large(HTTP_FD *p_link) {
 			} else {
 				retCode = "Filename not found!";
 			}
-			if (file_stored == file_size) { /* 文件所有内容已经接受完毕 */
+			if (file_stored == file_size) { /* all content is saved */
 				if (0 == strcmp(retCode, "null")) {
 					rename("web_upload.tmp", p_upfile->fname);
 					retCode = "success";
@@ -489,7 +489,7 @@ int http_cgi_ssl_ctx_cfg(HTTP_FD *p_link) {
 	int ret = 0;
 	const HTTP_FILES *p_certfile = NULL;
 	const char *cert_pwd = NULL;
-	int mutual = 0;
+	// int mutual = 0;
 
 	p_certfile = web_file_data(p_link, "svr_certfile");
 	cert_pwd = web_post_str(p_link, "password", "");
@@ -499,7 +499,7 @@ int http_cgi_ssl_ctx_cfg(HTTP_FD *p_link) {
 		}
 		
 	}
-	mutual = atoi(web_post_str(p_link, "mutual_auth", ""));
+	// mutual = atoi(web_post_str(p_link, "mutual_auth", ""));
 	p_certfile = web_file_data(p_link, "ca_certfile");
 	if (p_certfile != NULL && p_certfile->fname[0] != '\0') {
 		//ret = set_mutual_auth(mutual, (char *)(p_certfile->fcontent));
@@ -510,7 +510,7 @@ int http_cgi_ssl_ctx_cfg(HTTP_FD *p_link) {
 		printf("set_mutual_auth failed!\n");
 		goto exit_fn;
 	}
-	//ssl_ctx_reload(); /* 重新加载ssl会话环境 */
+	//ssl_ctx_reload(); /* reload SSL context */
 exit_fn:
 	if (ret == 0) {
 		printf("operate success!\n");
@@ -672,7 +672,7 @@ int http_show_malloc(HTTP_FD *p_link) {
 	web_fin(p_link, 200);
 	return 0;
 }
-static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable content */
+static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "content, only used by web server */
 	SENDING_INFO *send_info = (SENDING_INFO *)p_link->user_data;
 	HTTP_RANGE *p_range = send_info->range;
 	FILE *fp = (FILE *)send_info->fp;
@@ -763,8 +763,8 @@ int http_send_file(HTTP_FD *p_link) {
 		resp_code = 404;
 		goto exit;
 	}
-	fseek(send_info->fp, 0, SEEK_END);
-	send_info->size = ftell(send_info->fp);
+	fseek((FILE *)send_info->fp, 0, SEEK_END);
+	send_info->size = ftell((FILE *)send_info->fp);
 	for (p_range = p_link->range_data; p_range != NULL; p_range = p_range->next) {
 		if (p_range->end == RANGE_NOTSET) {
 			p_range->end = send_info->size - 1;
@@ -830,6 +830,7 @@ exit:
 	}
 	return 0;
 }
+#ifdef WITH_WEBSOCKET
 int http_ws_test(HTTP_FD *p_link, E_WS_EVENT event) {
 	switch (event) {
 		case EVENT_ONOPEN:
@@ -854,6 +855,8 @@ int http_ws_test(HTTP_FD *p_link, E_WS_EVENT event) {
 	}
 	return 0;
 }
+#endif
+
 int http_callback_default(HTTP_FD *p_link) {
 	TT_FILE *ram_file = NULL;
 	char file_etag[36];
@@ -865,7 +868,7 @@ int http_callback_default(HTTP_FD *p_link) {
 		http_send_file(p_link);
 		return 0;
 	}
-	// 先获取一下资源后缀
+	// get suffix of resource
 	for (p_char = p_link->path; *p_char != '\0'; p_char++) {
 		if (pre_is_slash) {
 			pre_is_slash = 0;
@@ -880,23 +883,23 @@ int http_callback_default(HTTP_FD *p_link) {
 	}
 	sprintf(file_etag, "\"%s\"", ram_file->sz_md5);
 
-	// 设置缓存策略
+	// set cache policy
 	if (0 == strcmp(p_suffix, ".html")) {
-		web_set_header(p_link, "Cache-Control", "public, max-age=30");//html页面允许缓存30秒
+		web_set_header(p_link, "Cache-Control", "public, max-age=30"); //html cached 30 seconds
 		web_set_header(p_link, "Pragma", NULL);
 	} else if (0 == strcmp(p_suffix, ".js")) {
-		web_set_header(p_link, "Cache-Control", "public, max-age=120");//js允许缓存2分钟
+		web_set_header(p_link, "Cache-Control", "public, max-age=120"); //js cached 2 minutes
 		web_set_header(p_link, "Pragma", NULL);
 	} else if (0 == strcmp(p_suffix, ".gif") || 0 == strcmp(p_suffix, ".jpg") || 0 == strcmp(p_suffix, ".jpeg") || 0 == strcmp(p_suffix, ".png")) {
-		web_set_header(p_link, "Cache-Control", "public, max-age=120");//图片允许缓存2分钟
+		web_set_header(p_link, "Cache-Control", "public, max-age=120"); // picture cached 2 minutes
 		web_set_header(p_link, "Pragma", NULL);
 	} else if (0 == strcmp(p_suffix, ".css")) {
-		web_set_header(p_link, "Cache-Control", "public, max-age=300");//css允许缓存5分钟
+		web_set_header(p_link, "Cache-Control", "public, max-age=300"); //css cached 5 minutes
 		web_set_header(p_link, "Pragma", NULL);
 	} else if (0 == strcmp(p_suffix, ".woff") || 0 == strcmp(p_suffix, ".ttf")) {
-		web_set_header(p_link, "Cache-Control", "public, max-age=300");//字体允许缓存5分钟
+		web_set_header(p_link, "Cache-Control", "public, max-age=300"); // font cached 5 minutes
 		web_set_header(p_link, "Pragma", NULL);
-	} else {// 其他资源不允许缓存，默认就是不允许缓存，报文头无需增加缓存策略
+	} else {// not cached for other resource
 	}
 	if (0 != strcmp(file_etag, web_header_str(p_link, "If-None-Match", ""))) {
 		web_set_header(p_link, "Etag", file_etag);
@@ -924,7 +927,7 @@ void tt_webpolling(void) {
 }
 
 int msg_test(const char *name, void *buf, size_t len) {
-	printf("%s %p %" SIZET_FMT, name, buf, len);
+	printf("%s %p %" SIZET_FMT "\n", name, buf, len);
 	return 0;
 }
 
@@ -965,9 +968,9 @@ void tt_handler_register() {
 	tt_msg_handler_init();
 	tt_msg_handler_add("test", msg_test);
 }
-/* http请求的分发 */
+/* dispatch all http request */
 int req_dispatch(HTTP_FD *p_link) {
-	char *no_auth[] = {"/", "/signin.html", "/cgi/signin.json", \
+	const char *no_auth[] = {"/", "/signin.html", "/cgi/signin.json", \
 		"/js/vue.js", "/js/vue.min.js", "/js/vue-router.js", "/js/vue-router.min.js", "/js/axios.min.js", "/js/elementui.js", "/js/myapp.js", \
 		"/favicon.ico", "/css/elementui.css", "/css/myapp.css", "/css/fonts/element-icons.woff", "/css/fonts/element-icons.ttf", \
 		"/cgi_exec", "/cgi_exec.sh", "/cgi_exec.py", "/call_system", \
@@ -1046,7 +1049,7 @@ int msg_dispatch(const char *name, void *buf, size_t len) {
 
 	callback = tt_msg_handler_get(name);
 	if (callback) {
-		callback(name, buf, len);
+		return callback(name, buf, len);
 	}
-	return 0;
+	return -1;
 }

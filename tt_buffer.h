@@ -8,10 +8,10 @@ extern "C" {
 #endif
 
 typedef struct ST_TT_BUFFER{
-	unsigned char *content; /* 缓冲区内容头指针 */
-	size_t used; /* 缓冲区已使用的大小 */
-	size_t space; /* 为缓冲区申请的内存空间大小 */
-	int is_malloced; /* 缓冲区是否是malloc的标记 */
+	unsigned char *content; /* point to content */
+	size_t used; /* size of used space */
+	size_t space; /* size of malloc space */
+	int is_malloced; /* mark content is malloced or not */
 }TT_BUFFER;
 
 extern int tt_buffer_init(TT_BUFFER *buffer);

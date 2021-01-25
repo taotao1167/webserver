@@ -4,7 +4,7 @@
 #include <pthread.h>
 #include <time.h>
 
-/* #include "tt_semaphore.h" 如果要使用自定义的信号量函数就放开此注释 */
+/* #include "tt_semaphore.h" use self defined semaphore */
 #ifndef __TT_SEMAPHORE_H__
 	#include <semaphore.h>
 	#define tt_sem_t sem_t
