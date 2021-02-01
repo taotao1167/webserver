@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>TEST H264</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+	<script src="js/libffmpeg.js"></script>
+	<script src="js/video.js"></script>
+	<script src="js/webgl.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<el-form label-position="left" label-width="100px">
+			<el-form-item label="URL">
+				<el-input placeholder="URL" v-model="formData.wsurl"></el-input>
+			</el-form-item>
+		</el-form>
+		<div>
+			<el-button @click="open_websocket" :disabled="connected">Open</el-button>
+			<el-button @click="close_websocket" :disabled="!connected">Close</el-button>
+		</div>
+		<canvas id="playCanvas"></canvas>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+var AV_CODEC_ID_H264 = 27;
+var AV_PIX_FMT_YUV420P = 0;
+var AV_PIX_FMT_YUVJ420P = 12;
+var webglPlayer;
+var notify_fn = -1;
+var g_ws;
+
+function display(data, data_size, width, height) {
+	// console.log("%d x %d", width, height);
+	var frame_data = new Uint8Array(data_size);
+	frame_data.set(Module.HEAPU8.subarray(data, data + data_size));
+	// console.log(frame_data);
+	if(!webglPlayer) {
+		var canvas = document.getElementById("playCanvas");
+		canvas.width = width;
+		canvas.height = height;
+		webglPlayer = new WebGLPlayer(canvas, {
+			preserveDrawingBuffer: false
+		});
+	}
+	webglPlayer.renderFrame(frame_data, width, height);
+	delete frame_data;
+}
+function init_decoder() {
+	if (notify_fn == -1) {
+		notify_fn = Module.addFunction(display, "viiii");
+	}
+    var ret = Module._init_decoder(AV_CODEC_ID_H264, AV_PIX_FMT_YUV420P, notify_fn);
+    if(ret == 0) {
+        console.log("openDecoder success");
+    } else {
+        console.error("openDecoder failed with error", ret);
+    }
+	return ret;
+}
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			connected: false,
+			formData: {
+				wsurl: "ws://" + document.location.host + "/ws/video",
+			}
+		},
+		methods: {
+			open_websocket: function() {
+				if(!window.WebSocket){
+					this.$alert("your browser not support websocket.", "Not Support");
+					return;
+				}
+				g_ws = new WebSocket(this.formData.wsurl);
+				g_ws.onopen = function(){
+					init_decoder();
+					myapp.connected = true;
+					myapp.$notify.success({title:"Success",message:"websocket connected!"});
+				};
+				g_ws.onmessage = function(evt) { 
+					var received_msg = evt.data;
+					received_msg.arrayBuffer().then(function(ab) {
+						var typedArray = new Uint8Array(ab);
+						var size = ab.byteLength;
+						var cacheBuffer = Module._malloc(size);
+						Module.HEAPU8.set(typedArray, cacheBuffer);
+						ret = Module._decode_pkg(cacheBuffer, size);
+						// console.log("decode_pkg, return %d.", ret);
+						if (cacheBuffer != null) {
+							Module._free(cacheBuffer);
+							cacheBuffer = null;
+						}
+						delete typedArray;
+					});
+				};
+				g_ws.onclose = function(){
+					myapp.connected = false;
+					Module._close_decoder();
+					myapp.$notify.warning({title:"Closed",message:"websocket closed!"});
+					webglPlayer = undefined;
+				};
+				g_ws.onerror = function(){
+					myapp.$notify.error({title:"Error",message:"websocket error!"});
+				};
+			},
+			close_websocket: function() {
+				g_ws.close();
+			}
+		}
+	});
+</script>
+</body>
+</html>
