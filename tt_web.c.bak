@@ -39,7 +39,7 @@
 #include "tt_msgqueue.h"
 #endif
 
-#define emergency_printf(fmt,...) printf("%s %d: ", __func__, __LINE__);printf(fmt, ##__VA_ARGS__)
+#define emergency_printf(fmt,...) printf("%s %d: ", __FILE__, __LINE__);printf(fmt, ##__VA_ARGS__)
 //#define emergency_printf(fmt,...)
 #define error_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
 //#define error_printf(fmt,...)
@@ -56,9 +56,9 @@
 
 #ifdef WATCH_RAM
 #include "tt_malloc_debug.h"
-#define MY_MALLOC(x) my_malloc((x), __func__, __LINE__)
-#define MY_FREE(x) my_free((x), __func__, __LINE__)
-#define MY_REALLOC(x, y) my_realloc((x), (y), __func__, __LINE__)
+#define MY_MALLOC(x) my_malloc((x), __FILE__, __LINE__)
+#define MY_FREE(x) my_free((x), __FILE__, __LINE__)
+#define MY_REALLOC(x, y) my_realloc((x), (y), __FILE__, __LINE__)
 #else
 #define MY_MALLOC(x) malloc((x))
 #define MY_FREE(x) free((x))
@@ -3189,7 +3189,7 @@ int web_server_run() {
 		for (p_curlink = g_http_links; p_curlink != NULL; p_curlink = p_curlink->next) { /* 依次对每个连接进行处理 */
 			if (p_curlink->state == STATE_SENDING || p_curlink->state == STATE_CLOSING) { /* 需要发送内容 */
 				if (FD_ISSET(p_curlink->cli_sock, &except_set)) { /* socket异常 */
-					debug_printf("%s %d: except\n", __func__, __LINE__);
+					debug_printf("%s %d: except\n", __FILE__, __LINE__);
 					p_curlink->state = STATE_CLOSED;
 				} else if (FD_ISSET(p_curlink->cli_sock, &write_set)) { /* socket可写 */
 					http_sendevt(p_curlink); /* http数据发送 */
@@ -3200,7 +3200,7 @@ int web_server_run() {
 				}
 			} else if (p_curlink->state == STATE_RECVING) { /* 需要接收内容 */
 				if (FD_ISSET(p_curlink->cli_sock, &except_set)) { /* socket异常 */
-					debug_printf("%s %d: except\n", __func__, __LINE__);
+					debug_printf("%s %d: except\n", __FILE__, __LINE__);
 					p_curlink->state = STATE_CLOSED;
 				} else if (FD_ISSET(p_curlink->cli_sock, &read_set)) { /* socket可读 */
 					http_recvevt(p_curlink); /* http数据接收 */
@@ -3280,7 +3280,7 @@ int web_server_run() {
 		/* 进行http tcp握手(IPv4) */
 		if (g_svr_sock != -1) {
 			if (FD_ISSET(g_svr_sock, &except_set)) {
-				debug_printf("%s %d: except\n", __func__, __LINE__);
+				debug_printf("%s %d: except\n", __FILE__, __LINE__);
 			} else if (FD_ISSET(g_svr_sock, &read_set)) {
 				debug_printf("before http accept\n");
 				len = sizeof(cli_addr);
@@ -3305,7 +3305,7 @@ int web_server_run() {
 		/* 进行http tcp握手(IPv6) */
 		if (g_svr_sock6 != -1) {
 			if (FD_ISSET(g_svr_sock6, &except_set)) {
-				debug_printf("%s %d: except\n", __func__, __LINE__);
+				debug_printf("%s %d: except\n", __FILE__, __LINE__);
 			} else if (FD_ISSET(g_svr_sock6, &read_set)) {
 				debug_printf("before http accept\n");
 				len = sizeof(cli_addr6);
@@ -3331,7 +3331,7 @@ int web_server_run() {
 		/* 进行https tcp握手(IPv4) */
 		if (g_ssl_svr_sock != -1) {
 			if (FD_ISSET(g_ssl_svr_sock, &except_set)) {
-				debug_printf("%s %d: except\n", __func__, __LINE__);
+				debug_printf("%s %d: except\n", __FILE__, __LINE__);
 			} else if (FD_ISSET(g_ssl_svr_sock, &read_set)) {
 				debug_printf("before https accept\n");
 				len = sizeof(cli_addr);
@@ -3356,7 +3356,7 @@ int web_server_run() {
 		/* 进行https tcp握手(IPv6) */
 		if (g_ssl_svr_sock6 != -1) {
 			if (FD_ISSET(g_ssl_svr_sock6, &except_set)) {
-				debug_printf("%s %d: except\n", __func__, __LINE__);
+				debug_printf("%s %d: except\n", __FILE__, __LINE__);
 			} else if (FD_ISSET(g_ssl_svr_sock6, &read_set)) {
 				debug_printf("before https accept\n");
 				len = sizeof(cli_addr6);

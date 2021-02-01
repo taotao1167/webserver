@@ -8,9 +8,9 @@
 
 #ifdef WATCH_RAM
 #include "tt_malloc_debug.h"
-#define MY_MALLOC(x) my_malloc((x), __func__, __LINE__)
-#define MY_FREE(x) my_free((x), __func__, __LINE__)
-#define MY_REALLOC(x, y) my_realloc((x), (y), __func__, __LINE__)
+#define MY_MALLOC(x) my_malloc((x), __FILE__, __LINE__)
+#define MY_FREE(x) my_free((x), __FILE__, __LINE__)
+#define MY_REALLOC(x, y) my_realloc((x), (y), __FILE__, __LINE__)
 #else
 #define MY_MALLOC(x) malloc((x))
 #define MY_FREE(x) free((x))
@@ -62,7 +62,7 @@ int tt_buffer_swapto_malloced(TT_BUFFER *buffer, size_t content_len) {
 			buf_bak = buffer->content;
 			buffer->content = (unsigned char *)MY_MALLOC(buffer->space);
 			if (buffer->content == NULL) {
-				printf("ERROR: malloc failed at %s %d\n", __func__, __LINE__);
+				printf("ERROR: malloc failed at %s %d\n", __FILE__, __LINE__);
 				buffer->content = buf_bak;
 				buffer->is_malloced = 0;
 				buffer->space = 0;
@@ -73,7 +73,7 @@ int tt_buffer_swapto_malloced(TT_BUFFER *buffer, size_t content_len) {
 		} else {
 			buffer->content = (unsigned char *)MY_MALLOC(buffer->space);
 			if (buffer->content == NULL) {
-				printf("ERROR: malloc failed at %s %d\n", __func__, __LINE__);
+				printf("ERROR: malloc failed at %s %d\n", __FILE__, __LINE__);
 				tt_buffer_init(buffer);
 				return -1;
 			}
@@ -84,7 +84,7 @@ int tt_buffer_swapto_malloced(TT_BUFFER *buffer, size_t content_len) {
 		}
 		buffer->content = (unsigned char *)MY_REALLOC(buffer->content, buffer->space);
 		if (buffer->content == NULL) {
-			printf("ERROR: realloc failed at %s %d\n", __func__, __LINE__);
+			printf("ERROR: realloc failed at %s %d\n", __FILE__, __LINE__);
 			tt_buffer_init(buffer);
 			return -1;
 		}
@@ -165,7 +165,7 @@ int tt_buffer_vprintf(TT_BUFFER *buffer, const char *format, va_list args) {
 			buffer->space <<= 1;
 			buffer->content = (unsigned char *)MY_REALLOC(buffer->content, buffer->space);
 			if (buffer->content == NULL) {
-				printf("ERROR: realloc failed at %s %d\n", __func__, __LINE__);
+				printf("ERROR: realloc failed at %s %d\n", __FILE__, __LINE__);
 				tt_buffer_init(buffer);
 				return -1;
 			}
@@ -184,7 +184,7 @@ int tt_buffer_vprintf(TT_BUFFER *buffer, const char *format, va_list args) {
 		}
 		buffer->content = (unsigned char *)MY_REALLOC(buffer->content, buffer->space);
 		if (buffer->content == NULL) {
-			printf("ERROR: realloc failed at %s %d\n", __func__, __LINE__);
+			printf("ERROR: realloc failed at %s %d\n", __FILE__, __LINE__);
 			tt_buffer_init(buffer);
 			return -1;
 		}
@@ -225,7 +225,7 @@ int tt_buffer_write(TT_BUFFER *buffer, const void *content, size_t content_len) 
 		}
 		buffer->content = (unsigned char *)MY_REALLOC(buffer->content, buffer->space);
 		if (buffer->content == NULL) {
-			printf("ERROR: realloc failed at %s %d\n", __func__, __LINE__);
+			printf("ERROR: realloc failed at %s %d\n", __FILE__, __LINE__);
 			tt_buffer_init(buffer);
 			return -1;
 		}

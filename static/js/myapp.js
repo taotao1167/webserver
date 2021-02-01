@@ -237,6 +237,6 @@ function heartbeatData(resp) {
 	}
 }
 function send_heartbeat(){
-	axios.get("/cgi/heartbeat.json?v="+String(Math.random()).split(".")[1]).then(heartbeatData);
+	axios.get("/cgi/heartbeat.json?v="+String(Math.random()).split(".")[1]).then(heartbeatData).catch(e => {});
 }
 g_heartbeat_timer = setInterval("send_heartbeat()", 5000);

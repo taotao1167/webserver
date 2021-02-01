@@ -14,9 +14,9 @@
 
 #ifdef WATCH_RAM
 #include "tt_malloc_debug.h"
-#define MY_MALLOC(x) my_malloc((x), __func__, __LINE__)
-#define MY_FREE(x) my_free((x), __func__, __LINE__)
-#define MY_REALLOC(x, y) my_realloc((x), (y), __func__, __LINE__)
+#define MY_MALLOC(x) my_malloc((x), __FILE__, __LINE__)
+#define MY_FREE(x) my_free((x), __FILE__, __LINE__)
+#define MY_REALLOC(x, y) my_realloc((x), (y), __FILE__, __LINE__)
 #else
 #define MY_MALLOC(x) malloc((x))
 #define MY_FREE(x) free((x))
@@ -41,12 +41,8 @@ static HTTP_SESSION *append_session(const char *session_id, char *ip) {
 	if (g_http_sessions == NULL) {
 		g_http_sessions = new_session;
 	} else {
-		for (p_tail = g_http_sessions; ; p_tail = p_tail->next) {
-			if (p_tail->next == NULL) {
-				p_tail->next = new_session;
-				break;
-			}
-		}
+		for (p_tail = g_http_sessions; p_tail->next != NULL; p_tail = p_tail->next);
+		p_tail->next = new_session;
 	}
 	g_session_count++;
 	return new_session;
@@ -66,8 +62,12 @@ int session_unset_storage(HTTP_SESSION *p_session, const char *name) {
 			} else {
 				p_pre->next = p_next;
 			}
-			MY_FREE(p_cur->key);
-			MY_FREE(p_cur->value);
+			if (p_cur->key != NULL) {
+				MY_FREE(p_cur->key);
+			}
+			if (p_cur->value != NULL) {
+				MY_FREE(p_cur->value);
+			}
 			MY_FREE(p_cur);
 		} else {
 			p_pre = p_cur;

@@ -54,7 +54,7 @@
 #include "tt_session.h"
 #endif
 
-#define emergency_printf(fmt,...) printf("%s %d: ", __func__, __LINE__);printf(fmt, ##__VA_ARGS__)
+#define emergency_printf(fmt,...) printf("%s %d: ", __FILE__, __LINE__);printf(fmt, ##__VA_ARGS__)
 //#define emergency_printf(fmt,...)
 #define error_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
 //#define error_printf(fmt,...)
@@ -71,9 +71,9 @@
 
 #ifdef WATCH_RAM
 #include "tt_malloc_debug.h"
-#define MY_MALLOC(x) my_malloc((x), __func__, __LINE__)
-#define MY_FREE(x) my_free((x), __func__, __LINE__)
-#define MY_REALLOC(x, y) my_realloc((x), (y), __func__, __LINE__)
+#define MY_MALLOC(x) my_malloc((x), __FILE__, __LINE__)
+#define MY_FREE(x) my_free((x), __FILE__, __LINE__)
+#define MY_REALLOC(x, y) my_realloc((x), (y), __FILE__, __LINE__)
 #else
 #define MY_MALLOC(x) malloc((x))
 #define MY_FREE(x) free((x))
@@ -1405,12 +1405,8 @@ int web_set_header(HTTP_FD *p_link, const char *name, const char *value) {
 	if (p_link->cnf_header == NULL) {
 		p_link->cnf_header = p_new;
 	} else {
-		for (p_tail = p_link->cnf_header; ; p_tail = p_tail->next) {
-			if (p_tail->next == NULL) {
-				p_tail->next = p_new;
-				break;
-			}
-		}
+		for (p_tail = p_link->cnf_header; p_tail->next != NULL; p_tail = p_tail->next);
+		p_tail->next = p_new;
 	}
 	return 0;
 }
@@ -1490,6 +1486,7 @@ const char *get_mime_type(const char *p_path) {
 			{".htm", "text/html"},
 			{".xhtml", "text/html"},
 			{".js", "text/javascript"},
+			{".wasm", "application/wasm"},
 			{".css", "text/css"},
 			{".txt", "text/plain"},
 			{".gif", "image/gif"},
@@ -1603,7 +1600,7 @@ int web_fin(HTTP_FD *p_link, int http_code) {
 			{"Connection","Keep-Alive"},
 			{NULL, NULL}
 		};
-	if (http_code != 200 && http_code != 206 && http_code != 302 && http_code != 304) {
+	if (0 && http_code != 101 && http_code != 200 && http_code != 206 && http_code != 302 && http_code != 304) {
 		printf("---------------------\n");
 		printf("response code %d\n", http_code);
 		hexdump(p_link->recvbuf, p_link->recvbuf_len);
@@ -2045,6 +2042,7 @@ static void apply_change(HTTP_FD *p_link) {
 				bufferevent_write(p_link->bev, p_link->ws_sendq.content, p_link->ws_sendq.used);
 				p_link->sending_len = p_link->ws_sendq.used;
 				bufferevent_enable(p_link->bev, EV_WRITE);
+			} else {
 			}
 		} else {
 			bufferevent_disable(p_link->bev, EV_WRITE);
@@ -2277,6 +2275,7 @@ int ws_pack(HTTP_FD *p_link, unsigned char opcode) {
 		p_link->ws_response.content[0] = '\0';
 	}
 	p_link->ws_response.used = 0;
+	apply_change(p_link);
 	return 0;
 }
 static int upgrade_websocket(HTTP_FD *p_link) {
@@ -2447,14 +2446,19 @@ static int msg_queue_check() {
 
 	p_pre = NULL;
 	p_next = NULL;
-	/* clear msg that msgq_ref == 0 */
+	/* clear msg that msg.msgq_ref == 0 */
 	for (p_inner = g_web_inner_msg_head; p_inner != NULL; p_inner = p_next) {
 		p_next = p_inner->next;
 		if (p_inner->ref_cnt == 0) {
 			if (p_inner->resp_msgq != NULL) {
 				msgq_destroy(p_inner->resp_msgq);
-				MY_FREE(p_inner->name);
 				MY_FREE(p_inner->resp_msgq);
+			}
+			if (p_inner->name != NULL) {
+				MY_FREE(p_inner->name);
+			}
+			if (p_inner->payload != NULL) {
+				MY_FREE(p_inner->payload);
 			}
 			MY_FREE(p_inner);
 			if (p_pre != NULL) {
@@ -2513,11 +2517,13 @@ static int inner_call(const char *name, void *payload, size_t payload_len, int i
 	}
 	memset(p_inner, 0x00, sizeof(HTTP_INNER_MSG));
 	p_inner->is_sync = is_sync;
-	if (!is_sync) {
+	if (is_sync) {
+		p_inner->ref_cnt = 1;
+	} else {
 		p_inner->callback = callback;
 		p_inner->arg = arg;
+		p_inner->ref_cnt = 0;
 	}
-	p_inner->ref_cnt = 1;
 	if (name != NULL) {
 		p_inner->name = (char *)MY_MALLOC(strlen(name) + 1);
 		if (p_inner->name == NULL) {
@@ -2533,17 +2539,19 @@ static int inner_call(const char *name, void *payload, size_t payload_len, int i
 	p_inner->payload_len = payload_len;
 	if (is_sync) {
 		p_inner->resp_msgq = (MSG_Q *)MY_MALLOC(sizeof(MSG_Q));
-		msgq_init(p_inner->resp_msgq, 0);
-		if (0 != msg_put(&g_web_inner_msg, p_inner)) {
-			emergency_printf("msg_put failed.\n");
-			ret = -1;
-			goto exit;
-		}
 		if (p_inner->resp_msgq == NULL) {
 			ret = 0;
 			goto exit;
 		}
-		write(g_msg_fd[1], "0", 1);
+		msgq_init(p_inner->resp_msgq, 0);
+	}
+	if (0 != msg_put(&g_web_inner_msg, p_inner)) {
+		emergency_printf("msg_put failed.\n");
+		ret = -1;
+		goto exit;
+	}
+	write(g_msg_fd[1], "0", 1);
+	if (is_sync) {
 		tmout.tv_sec = 1; /* timeout in 1 second */
 		tmout.tv_nsec = 0;
 		response = (HTTP_CALLBACK_RESPONSE *)msg_timedget(p_inner->resp_msgq, &tmout);
@@ -2557,7 +2565,9 @@ static int inner_call(const char *name, void *payload, size_t payload_len, int i
 	}
 exit:
 	if (p_inner != NULL) {
-		p_inner->ref_cnt -= 1;
+		if (is_sync) {
+			p_inner->ref_cnt = 0;
+		}
 	}
 	return ret;
 }
@@ -2584,6 +2594,7 @@ void listen_cb_web(struct evconnlistener *listener, evutil_socket_t fd, struct s
 #endif
 	struct sockaddr_in local_addr;
 	socklen_t addr_len;
+	int tcp_nodelay = 1;
 
 	new_link = (HTTP_FD *)MY_MALLOC(sizeof(HTTP_FD));
 	if (new_link == NULL) {
@@ -2635,6 +2646,11 @@ void listen_cb_web(struct evconnlistener *listener, evutil_socket_t fd, struct s
 	}
 	if (new_link->bev == NULL) {
 		emergency_printf("create bufferevent failed.\n");
+		return;
+	}
+
+	if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (void *)&tcp_nodelay, sizeof(tcp_nodelay)) < 0) {
+		emergency_printf("setsockopt failed.\n");
 		return;
 	}
 	bufferevent_setcb(new_link->bev, read_cb_web, write_cb_web, event_cb_web, new_link);

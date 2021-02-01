@@ -16,9 +16,9 @@
 
 #ifdef WATCH_RAM
 #include "tt_malloc_debug.h"
-#define MY_MALLOC(x) my_malloc((x), __func__, __LINE__)
-#define MY_FREE(x) my_free((x), __func__, __LINE__)
-#define MY_REALLOC(x, y) my_realloc((x), (y), __func__, __LINE__)
+#define MY_MALLOC(x) my_malloc((x), __FILE__, __LINE__)
+#define MY_FREE(x) my_free((x), __FILE__, __LINE__)
+#define MY_REALLOC(x, y) my_realloc((x), (y), __FILE__, __LINE__)
 #else
 #define MY_MALLOC(x) malloc((x))
 #define MY_FREE(x) free((x))

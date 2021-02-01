@@ -4,7 +4,7 @@ else
 	PLATFORM := "Linux"
 endif
 
-LIBNAME := lib/libhttpsvr.a
+LIBNAME := lib/libwebserver.a
 
 #source file
 OBJS_C := tt_web.o tt_web_dispatch.o tt_file.o tt_buffer.o tt_malloc_debug.o \
@@ -16,7 +16,7 @@ OBJS_CPP :=
 CC      := gcc
 CXX     := g++
 LIBS    := -lpthread -levent -levent_openssl -lcrypto -lssl
-DEFINES := -DWATCH_RAM -DWITH_IPV6 -DWITH_WEBSOCKET -DWITH_SSL
+DEFINES := -DWITH_IPV6 -DWITH_WEBSOCKET -DWITH_SSL -DWATCH_RAM -rdynamic
 ifeq ($(PLATFORM), "Windows")
 	LIBS    += -lws2_32
 	LDFLAGS := -L/mingw64/lib
@@ -30,7 +30,7 @@ CFLAGS  := -g -Wall -pthread -O3 $(DEFINES) $(INCLUDE)
 CXXFLAGS := $(CFLAGS)
 
 app: ${LIBNAME} main.c
-	$(CC) $(CFLAGS) main.c -Llib -lhttpsvr $(LIBS) -o $@
+	$(CC) $(CFLAGS) main.c -Llib -lwebserver $(LIBS) -o $@
 
 ${LIBNAME}: ${OBJS_C} ${OBJS_CPP}
 	ar -r $@ ${OBJS_C} ${OBJS_CPP}

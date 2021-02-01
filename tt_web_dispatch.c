@@ -39,9 +39,9 @@
 
 #ifdef WATCH_RAM
 #include "tt_malloc_debug.h"
-#define MY_MALLOC(x) my_malloc((x), __func__, __LINE__)
-#define MY_FREE(x) my_free((x), __func__, __LINE__)
-#define MY_REALLOC(x, y) my_realloc((x), (y), __func__, __LINE__)
+#define MY_MALLOC(x) my_malloc((x), __FILE__, __LINE__)
+#define MY_FREE(x) my_free((x), __FILE__, __LINE__)
+#define MY_REALLOC(x, y) my_realloc((x), (y), __FILE__, __LINE__)
 #else
 #define MY_MALLOC(x) malloc((x))
 #define MY_FREE(x) free((x))
@@ -82,7 +82,8 @@ int http_cgi_menu(HTTP_FD *p_link) {
 		"			{\"label\": \"Upload\", \"url\": \"/testUpload.html\"},\r\n"\
 		"			{\"label\": \"Upload Large\", \"url\": \"/testUploadLarge.html\"},\r\n"\
 		"			{\"label\": \"Download\", \"url\": \"/testDownload.html\"},\r\n"\
-		"			{\"label\": \"WebSocket\", \"url\": \"/testWebsocket.html\"}\r\n"\
+		"			{\"label\": \"WebSocket\", \"url\": \"/testWebsocket.html\"},\r\n"\
+		"			{\"label\": \"H264\", \"url\": \"/testH264.html\"}\r\n"\
 		"		]}\r\n"\
 		"	]\r\n"\
 		"}\r\n");
@@ -567,7 +568,7 @@ int http_cgi_exec(HTTP_FD *p_link) {
 		close(cgi_output[0]);
 		close(cgi_input[1]);
 		waitpid(pid, &status, 0);
-		printf("%s %d: status %d\n", __func__, __LINE__, status);
+		printf("%s %d: status %d\n", __FILE__, __LINE__, status);
 		web_fin(p_link, 200);
 	}
 	return 0;
@@ -607,7 +608,7 @@ int http_cgi_exec_bash(HTTP_FD *p_link) {
 		close(cgi_output[0]);
 		close(cgi_input[1]);
 		waitpid(pid, &status, 0);
-		printf("%s %d: status %d\n", __func__, __LINE__, status);
+		printf("%s %d: status %d\n", __FILE__, __LINE__, status);
 		web_fin(p_link, 200);
 	}
 	return 0;
@@ -648,7 +649,7 @@ int http_cgi_exec_python(HTTP_FD *p_link) {
 		close(cgi_output[0]);
 		close(cgi_input[1]);
 		waitpid(pid, &status, 0);
-		printf("%s %d: status %d\n", __func__, __LINE__, status);
+		printf("%s %d: status %d\n", __FILE__, __LINE__, status);
 		web_fin(p_link, 200);
 	}
 	return 0;
@@ -663,12 +664,8 @@ int http_call_system(HTTP_FD *p_link) {
 }
 int http_show_malloc(HTTP_FD *p_link) {
 #ifdef WATCH_RAM
-	RAM_RECORD *p_cur = NULL;
-	for (p_cur = g_ram_record_head; p_cur != NULL; p_cur = p_cur->next) {
-		web_printf(p_link, "<div>%s,%d: alloc %p size %u</div>", p_cur->func, p_cur->line, p_cur->ptr, (unsigned int)p_cur->size);
-	}
+	show_ram();
 #endif
-	
 	web_fin(p_link, 200);
 	return 0;
 }
