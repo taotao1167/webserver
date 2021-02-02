@@ -4,14 +4,25 @@
 #include <unistd.h>
 #include <string.h>
 #include <pthread.h>
+#ifndef _WIN32
 #include <execinfo.h>
+#endif
+#ifndef __TT_PLATFORM_H__
+#include "tt_platform.h"
+#endif
 #ifndef __TT_MALLOC_DEBUG_H__
 #include "tt_malloc_debug.h"
 #endif
 
+#ifdef _WIN32
+#define __libc_malloc malloc
+#define __libc_realloc realloc
+#define __libc_free free
+#else
 extern void *__libc_malloc(size_t size);
 extern void *__libc_realloc(void *ptr, size_t size);
 extern void *__libc_free(void *ptr);
+#endif
 
 #if 1
 #define debug_printf(fmt, ...)
@@ -49,6 +60,7 @@ static int append_record(void *ptr, size_t size, const char *fname, int line) {
 		p_new->prev = cursor;
 		if (cursor == NULL) {
 			p_new->next = g_ram_record_head;
+			g_ram_record_head = p_new;
 		} else {
 			p_new->next = cursor->next;
 		}
@@ -58,7 +70,6 @@ static int append_record(void *ptr, size_t size, const char *fname, int line) {
 		if (p_new->next) {
 			p_new->next->prev = p_new;
 		}
-		g_ram_record_head = p_new;
 		g_ram_record_cursor = p_new;
 	}
 	g_ram_used += size;
@@ -121,10 +132,12 @@ void *my_malloc(size_t size, const char *fname, int line) {
 
 void my_free(void *ptr, const char *fname, int line) {
 	RAM_RECORD *target = NULL;
+#ifndef _WIN32
 	#define SIZE 100
 	void *buffer[SIZE];
 	char **strings;
 	int i = 0, nptrs = 0;
+#endif
 
 	pthread_mutex_lock(&g_ram_record_lock);
 	target = find_match(ptr);
@@ -132,11 +145,13 @@ void my_free(void *ptr, const char *fname, int line) {
 		if (0 != memcmp((unsigned char *)ptr + target->size, RAM_TAIL, 4)) {
 			printf("%s,%d: free overflow heap %p alloc at fname %s,%d\n", fname, line, ptr, target->fname, target->line);
 		}
-		debug_printf("%s,%d: free heap %p(%zuB).\n", fname, line, ptr, target->size);
+		debug_printf("%s,%d: free heap %p(%" SIZET_FMT "B).\n", fname, line, ptr, target->size);
 		__libc_free(ptr);
 		remove_record(target);
 	} else {
-#if 1
+#ifdef _WIN32
+		printf("%s,%d: free invalid addr %p.\n", fname, line, ptr);
+#else
 		printf("-----------------------------\n");
 		printf("%s,%d: free invalid addr %p.\n", fname, line, ptr);
 		nptrs = backtrace(buffer, SIZE);
@@ -159,7 +174,7 @@ void *my_realloc(void *ptr, size_t size, const char *fname, int line) {
 		if (0 != memcmp((unsigned char *)ptr + target->size, RAM_TAIL, 4)) {
 			printf("%s,%d: realloc overflow heap %p alloc at fname %s,%d\n", fname, line, ptr, target->fname, target->line);
 		}
-		debug_printf("%s,%d: realloc heap %p(%zuB).\n", fname, line, ptr, target->size);
+		debug_printf("%s,%d: realloc heap %p(%" SIZET_FMT "B).\n", fname, line, ptr, target->size);
 	} else {
 		printf("%s,%d: realloc invalid addr %p.\n", fname, line, ptr);
 	}
@@ -170,9 +185,9 @@ void *my_realloc(void *ptr, size_t size, const char *fname, int line) {
 	} else {
 		memcpy((unsigned char *)ptr_new + size, RAM_TAIL, 4);
 		if (target != NULL) {
-			debug_printf("%s,%d: realloc heap %p(%zuB) -> %p(%zuB).\n", fname, line, ptr, target->size, ptr_new, size);
+			debug_printf("%s,%d: realloc heap %p(%" SIZET_FMT "B) -> %p(%" SIZET_FMT "B).\n", fname, line, ptr, target->size, ptr_new, size);
 		} else {
-			debug_printf("%s,%d: realloc heap %p(*) -> %p(%zuB).\n", fname, line, ptr, ptr_new, size);
+			debug_printf("%s,%d: realloc heap %p(*) -> %p(%" SIZET_FMT "B).\n", fname, line, ptr, ptr_new, size);
 		}
 		append_record(ptr_new, size, fname, line);
 	}
@@ -185,12 +200,14 @@ void *my_realloc(void *ptr, size_t size, const char *fname, int line) {
 
 void show_ram() {
 	RAM_RECORD *p_cur = NULL;
+	size_t used = 0;
 
 	pthread_mutex_lock(&g_ram_record_lock);
-	printf("total: %zu\n", g_ram_used);
 	for (p_cur = g_ram_record_head; p_cur != NULL; p_cur = p_cur->next) {
-		printf("%s,%d: alloc %p size %zu\n", p_cur->fname, p_cur->line, p_cur->ptr, p_cur->size);
+		printf("%s,%d: alloc %p size %" SIZET_FMT "\n", p_cur->fname, p_cur->line, p_cur->ptr, p_cur->size);
+		used += p_cur->size;
 	}
+	printf("total: %" SIZET_FMT " =? %" SIZET_FMT "\n", g_ram_used, used);
 	printf("show_ram finish\n");
 	pthread_mutex_unlock(&g_ram_record_lock);
 }

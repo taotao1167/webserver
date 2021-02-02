@@ -16,12 +16,13 @@ OBJS_CPP :=
 CC      := gcc
 CXX     := g++
 LIBS    := -lpthread -levent -levent_openssl -lcrypto -lssl
-DEFINES := -DWITH_IPV6 -DWITH_WEBSOCKET -DWITH_SSL -DWATCH_RAM -rdynamic
+DEFINES := -DWITH_IPV6 -DWITH_WEBSOCKET -DWITH_SSL -DWATCH_RAM
 ifeq ($(PLATFORM), "Windows")
 	LIBS    += -lws2_32
 	LDFLAGS := -L/mingw64/lib
 	INCLUDE := -I/mingw64/include
 else
+	DEFINES += -rdynamic
 	LDFLAGS :=
 	INCLUDE :=
 endif
@@ -33,6 +34,7 @@ app: ${LIBNAME} main.c
 	$(CC) $(CFLAGS) main.c -Llib -lwebserver $(LIBS) -o $@
 
 ${LIBNAME}: ${OBJS_C} ${OBJS_CPP}
+	@mkdir -p lib/
 	ar -r $@ ${OBJS_C} ${OBJS_CPP}
 	@mkdir -p include/
 	@cp *.h include/
