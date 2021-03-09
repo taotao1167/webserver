@@ -16,6 +16,7 @@ typedef struct ST_TT_BUFFER{
 
 extern int tt_buffer_init(TT_BUFFER *buffer);
 extern int tt_buffer_free(TT_BUFFER *buffer);
+extern int tt_buffer_empty(TT_BUFFER *buffer);
 extern int tt_buffer_swapto_malloced(TT_BUFFER *buffer, size_t content_len);
 extern int tt_buffer_vprintf(TT_BUFFER *buffer, const char *format, va_list args);
 extern int tt_buffer_printf(TT_BUFFER *buffer, const char *format, ...) __attribute__((format(printf, 2, 3)));

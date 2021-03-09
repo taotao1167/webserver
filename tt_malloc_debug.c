@@ -14,21 +14,11 @@
 #include "tt_malloc_debug.h"
 #endif
 
-#ifdef _WIN32
-#define __libc_malloc malloc
-#define __libc_realloc realloc
-#define __libc_free free
-#else
-extern void *__libc_malloc(size_t size);
-extern void *__libc_realloc(void *ptr, size_t size);
-extern void *__libc_free(void *ptr);
-#endif
-
 #if 1
 #define debug_printf(fmt, ...)
 // #define debug_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
 
-#define RAM_TAIL "\x5a\x5a\xa5\xa5"
+#define RAM_TAIL "\x5a\xff\xa5\x00"
 RAM_RECORD *g_ram_record_head = NULL;
 RAM_RECORD *g_ram_record_cursor = NULL;
 pthread_mutex_t g_ram_record_lock;
@@ -37,7 +27,7 @@ size_t g_ram_used = 0;
 static int append_record(void *ptr, size_t size, const char *fname, int line) {
 	RAM_RECORD *p_new = NULL, *cursor = NULL;
 
-	p_new = (RAM_RECORD *)__libc_malloc(sizeof(RAM_RECORD));
+	p_new = (RAM_RECORD *)malloc(sizeof(RAM_RECORD));
 	memset(p_new, 0x00, sizeof(RAM_RECORD));
 	if (p_new == NULL) {
 		return -1;
@@ -47,6 +37,9 @@ static int append_record(void *ptr, size_t size, const char *fname, int line) {
 	p_new->ptr = ptr;
 	p_new->size = size;
 	p_new->time = time(0);
+#ifndef _WIN32
+	p_new->trace_cnt = backtrace(p_new->backtrace, MAX_TRACE);
+#endif
 	if (g_ram_record_cursor == NULL) {
 		p_new->next = p_new->prev = NULL;
 		g_ram_record_cursor = g_ram_record_head = p_new;
@@ -89,7 +82,7 @@ static int remove_record(RAM_RECORD *target) {
 	if (target->next != NULL) {
 		target->next->prev = target->prev;
 	}
-	__libc_free(target);
+	free(target);
 	return 0;
 }
 static RAM_RECORD *find_match(void *ptr) {
@@ -118,7 +111,7 @@ int init_malloc_debug() {
 void *my_malloc(size_t size, const char *fname, int line) {
 	void *ptr = NULL;
 
-	ptr = __libc_malloc(size + 4);
+	ptr = malloc(size + 4);
 	if (ptr == NULL) {
 		// printf("%s,%d: malloc %u failed.\n", fname, line, (unsigned int)size);
 	} else {
@@ -146,7 +139,7 @@ void my_free(void *ptr, const char *fname, int line) {
 			printf("%s,%d: free overflow heap %p alloc at fname %s,%d\n", fname, line, ptr, target->fname, target->line);
 		}
 		debug_printf("%s,%d: free heap %p(%" SIZET_FMT "B).\n", fname, line, ptr, target->size);
-		__libc_free(ptr);
+		free(ptr);
 		remove_record(target);
 	} else {
 #ifdef _WIN32
@@ -159,6 +152,7 @@ void my_free(void *ptr, const char *fname, int line) {
 		for (i = 0; i < nptrs; i++) {
 			printf("%s\n", strings[i]);
 		}
+		free(strings);
 		printf("-----------------------------\n");
 #endif
 	}
@@ -179,7 +173,7 @@ void *my_realloc(void *ptr, size_t size, const char *fname, int line) {
 		printf("%s,%d: realloc invalid addr %p.\n", fname, line, ptr);
 	}
 
-	ptr_new = __libc_realloc(ptr, size + 4);
+	ptr_new = realloc(ptr, size + 4);
 	if (ptr_new == NULL) {
 		printf("%s,%d: realloc %u failed.\n", fname, line, (unsigned int)size);
 	} else {
@@ -198,17 +192,28 @@ void *my_realloc(void *ptr, size_t size, const char *fname, int line) {
 	return ptr_new;
 }
 
-void show_ram() {
+void show_ram(int inc_trace) {
 	RAM_RECORD *p_cur = NULL;
 	size_t used = 0;
+	char **traces = NULL;
+	int i = 0;
 
 	pthread_mutex_lock(&g_ram_record_lock);
 	for (p_cur = g_ram_record_head; p_cur != NULL; p_cur = p_cur->next) {
 		printf("%s,%d: alloc %p size %" SIZET_FMT "\n", p_cur->fname, p_cur->line, p_cur->ptr, p_cur->size);
+		if (inc_trace) {
+#ifndef _WIN32
+			traces = backtrace_symbols(p_cur->backtrace, p_cur->trace_cnt);
+			for (i = 0; i < p_cur->trace_cnt; i++) {
+				printf("\t%s\n", traces[i]);
+			}
+			free(traces);
+#endif
+		}
 		used += p_cur->size;
 	}
-	printf("total: %" SIZET_FMT " =? %" SIZET_FMT "\n", g_ram_used, used);
-	printf("show_ram finish\n");
+	// printf("Memory Leak>: %" SIZET_FMT " =? %" SIZET_FMT "\n", g_ram_used, used);
+	printf("Memory malloced: %" SIZET_FMT "\n", used);
 	pthread_mutex_unlock(&g_ram_record_lock);
 }
 #endif

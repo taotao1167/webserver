@@ -173,6 +173,9 @@ TT_FILE *get_file(const char *sz_path) {
 	TT_FILE *left = NULL, *right = NULL, *center = NULL;
 	int found_dir = 0;
 
+	if (g_file_info == NULL) {
+		return NULL;
+	}
 	p_start = sz_path;
 	p_name = (char *)MY_MALLOC(strlen(sz_path));
 	if (p_name == NULL) {

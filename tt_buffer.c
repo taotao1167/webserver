@@ -49,6 +49,10 @@ int tt_buffer_free(TT_BUFFER *buffer) {
 	return 0;
 }
 
+int tt_buffer_empty(TT_BUFFER *buffer) {
+	return tt_buffer_free(buffer);
+}
+
 int tt_buffer_swapto_malloced(TT_BUFFER *buffer, size_t content_len) {
 	unsigned char *buf_bak = NULL;
 	if (!(buffer->is_malloced)) {

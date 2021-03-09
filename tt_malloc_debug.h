@@ -8,12 +8,16 @@
 extern "C" {
 #endif
 
+#define MAX_TRACE 128
+
 typedef struct ST_RAM_RECORD{
 	const char *fname;
 	int line;
 	void *ptr;
 	size_t size;
 	time_t time;
+	void *backtrace[MAX_TRACE];
+	int trace_cnt;
 	struct ST_RAM_RECORD *prev;
 	struct ST_RAM_RECORD *next;
 }RAM_RECORD;
@@ -27,7 +31,7 @@ extern int init_malloc_debug();
 extern void *my_malloc(size_t size, const char *fname, int line);
 extern void *my_realloc(void *ptr, size_t size, const char *fname, int line);
 extern void my_free(void *ptr, const char *fname, int line);
-extern void show_ram();
+extern void show_ram(int inc_trace);
 
 #ifdef __cplusplus
 }

@@ -2891,21 +2891,21 @@ int init_webserver() {
 	WSAStartup(0x0201, &wsa_data);
 #endif
 	fin = fopen("package.bin", "rb");
-	if (fin == NULL) {
+	if (fin != NULL) {
+		fseek(fin, 0, SEEK_END);
+		fsize = ftell(fin);
+		fseek(fin, 0, SEEK_SET);
+		fcontent = (unsigned char *)MY_MALLOC(fsize);
+		if (fcontent == NULL) {
+			emergency_printf("malloc failed!\n");
+		}
+		fread(fcontent, fsize, 1, fin);
+		fclose(fin);
+		if (-1 == init_tree_info(fcontent, fsize)) {
+			return -1; 
+		}
+	} else {
 		emergency_printf("open package.bin failed.\n");
-		return -1;
-	}
-	fseek(fin, 0, SEEK_END);
-	fsize = ftell(fin);
-	fseek(fin, 0, SEEK_SET);
-	fcontent = (unsigned char *)MY_MALLOC(fsize);
-	if (fcontent == NULL) {
-		emergency_printf("malloc failed!\n");
-	}
-	fread(fcontent, fsize, 1, fin);
-	fclose(fin);
-	if (-1 == init_tree_info(fcontent, fsize)) {
-		return -1; 
 	}
 	tt_handler_register();
 

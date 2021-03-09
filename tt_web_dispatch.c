@@ -55,9 +55,9 @@
 typedef struct ST_SENDING_INFO {
 	void *fp;
 	char *mime_type;
-	char *boundary;
-	size_t size;
-	size_t offset;
+	char *boundary; /* define if multi range defined */
+	size_t size; /* file size */
+	size_t offset; /* offset based on file head */
 	HTTP_RANGE *range;
 }SENDING_INFO;
 
@@ -334,14 +334,15 @@ int http_svr_list(HTTP_FD *p_link) {
 		} else {
 			web_printf(p_link, ",");
 		}
-		web_printf(p_link, "{\"id\":%d,\"name\":\"%s\",\"ip_version\":\"%s\",\"port\":\"%d\",\"ssl\":%s}", \
+		web_printf(p_link, "{\"id\":%d,\"name\":\"%s\",\"ip_version\":\"%s\",\"port\":\"%d\",\"ssl\":%s,\"root\":\"%s\"}", \
 			p_cursvr->id, p_cursvr->name ? p_cursvr->name : "--",
 			(p_cursvr->ip_version == 6) ? "IPv6" : "IPv4", p_cursvr->port,
 #ifdef WITH_SSL
-			(p_cursvr->is_ssl) ? "true" : "false"
+			(p_cursvr->is_ssl) ? "true" : "false",
 #else
-			"false"
+			"false",
 #endif
+			(p_cursvr->root != NULL) ? p_cursvr->root : NULL
 			);
 	}
 	web_printf(p_link, "]}");
@@ -664,12 +665,12 @@ int http_call_system(HTTP_FD *p_link) {
 }
 int http_show_malloc(HTTP_FD *p_link) {
 #ifdef WATCH_RAM
-	show_ram();
+	show_ram(1);
 #endif
 	web_fin(p_link, 200);
 	return 0;
 }
-static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "content, only used by web server */
+static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "content", only used by web server */
 	SENDING_INFO *send_info = (SENDING_INFO *)p_link->user_data;
 	HTTP_RANGE *p_range = send_info->range;
 	FILE *fp = (FILE *)send_info->fp;
@@ -685,12 +686,12 @@ static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "co
 		split_len = send_info->size;
 	}
 	read_len = FILE_BUFFER_SIZE;
-	if (split_len < read_len) {
+	if (read_len > split_len) {
 		read_len = split_len;
 	}
 	p_link->response_entity.used = 0;
-	if (send_info->offset == 0) {
-		if (send_info->boundary != NULL) {
+	if (send_info->offset == 0) { /* content sending not start yet */
+		if (send_info->boundary != NULL) { /* multi range defined */
 			web_printf(p_link, "--%s\r\n", send_info->boundary);
 			web_printf(p_link, "Content-Type: %s\r\n", send_info->mime_type);
 			web_printf(p_link, "Content-Range: bytes %" SIZET_FMT "-%" SIZET_FMT "/%" SIZET_FMT "\r\n\r\n", p_range->start, p_range->end, send_info->size);
@@ -706,15 +707,15 @@ static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "co
 	p_link->state = STATE_SENDING;
 	p_link->send_state = SENDING_ENTITY;
 	if ((p_range == NULL && send_info->offset == send_info->size) || (p_range != NULL && send_info->offset == p_range->end + 1)) {
-		if (send_info->boundary != NULL) {
+		if (send_info->boundary != NULL) { /* multi range defined */
 			web_printf(p_link, "\r\n");
 		}
 		send_info->offset = 0;
 		if (p_range != NULL) {
 			send_info->range = p_range->next;
 		}
-		if (send_info->range == NULL) {
-			if (send_info->boundary != NULL) {
+		if (send_info->range == NULL) { /* last range send complete, response complete */
+			if (send_info->boundary != NULL) { /* multi range defined */
 				web_printf(p_link, "--%s--\r\n", send_info->boundary);
 			}
 			p_link->send_cb = NULL;
@@ -760,8 +761,13 @@ int http_send_file(HTTP_FD *p_link) {
 		resp_code = 404;
 		goto exit;
 	}
+#ifdef _WIN32
+	_fseeki64((FILE *)send_info->fp, 0, SEEK_END);
+	send_info->size = _ftelli64((FILE *)send_info->fp);
+#else
 	fseek((FILE *)send_info->fp, 0, SEEK_END);
 	send_info->size = ftell((FILE *)send_info->fp);
+#endif
 	for (p_range = p_link->range_data; p_range != NULL; p_range = p_range->next) {
 		if (p_range->end == RANGE_NOTSET) {
 			p_range->end = send_info->size - 1;
@@ -769,7 +775,7 @@ int http_send_file(HTTP_FD *p_link) {
 			p_range->start = send_info->size - p_range->end;
 			p_range->end = send_info->size - 1;
 		}
-		if (p_range->end < p_range->start) {
+		if (p_range->end < p_range->start || p_range->end >= send_info->size) {
 			resp_code = 416;
 			goto exit;
 		}
