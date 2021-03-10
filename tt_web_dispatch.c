@@ -681,7 +681,11 @@ static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "co
 		content = (unsigned char *)MY_MALLOC(FILE_BUFFER_SIZE);
 	}
 	if (p_range != NULL) {
-		split_len = p_range->end - p_range->start + 1;
+		if (send_info->offset == 0) { /* content sending not start yet */
+			split_len = p_range->end - p_range->start + 1;
+		} else {
+			split_len = p_range->end - send_info->offset + 1;
+		}
 	} else {
 		split_len = send_info->size;
 	}
@@ -776,6 +780,7 @@ int http_send_file(HTTP_FD *p_link) {
 			p_range->end = send_info->size - 1;
 		}
 		if (p_range->end < p_range->start || p_range->end >= send_info->size) {
+printf("will response 416, %s %d, %" SIZET_FMT " to %" SIZET_FMT " / %" SIZET_FMT "\n", __FILE__, __LINE__, p_range->start, p_range->end, send_info->size);
 			resp_code = 416;
 			goto exit;
 		}
@@ -984,7 +989,7 @@ int req_dispatch(HTTP_FD *p_link) {
 	if (0 != set_session(p_link)) {
 		return 0;
 	}
-#if 1
+#if 1 /* auto login as anonymous */
 	if (!p_link->session->isonline) {
 		printf("user \"anonymous\" login.\n");
 		session_login(p_link->session, "anonymous", 99);

@@ -251,13 +251,21 @@ int set_session(HTTP_FD *p_link) {
 			web_busy_response(p_link);
 			return 1;
 		} else {
-			snprintf(str_temp, sizeof(str_temp) - 1, "ip:%s,port:%u,time:%ld,rand:%d", p_link->ip_peer, p_link->port_peer, clock(), rand());
-			tt_sha1_hex((unsigned char *)str_temp, strlen(str_temp), sha1_output);
-			p_link->session = append_session(sha1_output, p_link->ip_peer);
-			if (p_link->session) {
-				snprintf(str_temp, sizeof(str_temp) - 1, "mark=%s; path=/; HttpOnly;", sha1_output);
-				web_set_header(p_link, "Set-Cookie", str_temp);
-			} else {
+#if 0
+			if (session_id != NULL) { /* use session_id from request */
+				p_link->session = append_session(session_id, p_link->ip_peer);
+			} else
+#endif
+			{
+				snprintf(str_temp, sizeof(str_temp) - 1, "ip:%s,port:%u,time:%ld,rand:%d", p_link->ip_peer, p_link->port_peer, clock(), rand());
+				tt_sha1_hex((unsigned char *)str_temp, strlen(str_temp), sha1_output);
+				p_link->session = append_session(sha1_output, p_link->ip_peer);
+				if (p_link->session != NULL) {
+					snprintf(str_temp, sizeof(str_temp) - 1, "mark=%s; path=/; HttpOnly;", sha1_output);
+					web_set_header(p_link, "Set-Cookie", str_temp);
+				}
+			}
+			if (p_link->session == NULL) {
 				web_fin(p_link, 500);
 				return 1;
 			}

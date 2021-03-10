@@ -1600,7 +1600,7 @@ int web_fin(HTTP_FD *p_link, int http_code) {
 			{"Connection","Keep-Alive"},
 			{NULL, NULL}
 		};
-	if (0 && http_code != 101 && http_code != 200 && http_code != 206 && http_code != 302 && http_code != 304) {
+	if (http_code != 101 && http_code != 200 && http_code != 206 && http_code != 302 && http_code != 304 && http_code != 404) {
 		printf("---------------------\n");
 		printf("response code %d\n", http_code);
 		hexdump(p_link->recvbuf, p_link->recvbuf_len);
@@ -1639,7 +1639,7 @@ int web_fin(HTTP_FD *p_link, int http_code) {
 				if (0 == strcasecmp(hfields[i][0], "Content-Length")) {
 					tt_buffer_printf(&(p_link->response_head), "Content-Length: %" SIZET_FMT "\r\n", p_link->response_entity.used);
 				} else if (0 == strcasecmp(hfields[i][0], "Content-Type")) {
-					if (p_link->path == NULL || http_code != 200) {
+					if (p_link->path == NULL || (http_code != 200 &&  http_code != 206)) {
 						tt_buffer_printf(&(p_link->response_head), "Content-Type: text/html\r\n");
 					} else {
 						tt_buffer_printf(&(p_link->response_head), "Content-Type: %s\r\n", get_mime_type(p_link->path));
