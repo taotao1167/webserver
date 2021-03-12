@@ -704,7 +704,11 @@ static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "co
 			send_info->offset = p_range->start;
 		}
 	}
+#ifdef _WIN32
+	_fseeki64(fp, send_info->offset, SEEK_SET);
+#else
 	fseek(fp, send_info->offset, SEEK_SET);
+#endif
 	fread(content, read_len, 1, fp);
 	send_info->offset += read_len;
 	web_write(p_link, content, read_len);

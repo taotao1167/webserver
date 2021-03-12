@@ -1145,12 +1145,12 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			memset(p_range_new, 0x00, sizeof(HTTP_RANGE));
 			debug_printf("range: '%s' to '%s'\n", p_range_start, p_range_end);
 			if (p_range_start[0] != '\0') {
-				p_range_new->start= atol(p_range_start);
+				p_range_new->start= atoll(p_range_start);
 			} else {
 				p_range_new->start = RANGE_NOTSET;
 			}
 			if (p_range_end[0] != '\0') {
-				p_range_new->end = atol(p_range_end);
+				p_range_new->end = atoll(p_range_end);
 			} else {
 				p_range_new->end = RANGE_NOTSET;
 			}
