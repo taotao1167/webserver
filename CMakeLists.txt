@@ -33,7 +33,7 @@ endif()
 if (NOT CMAKE_BUILD_TYPE)
 	SET(CMAKE_BUILD_TYPE Release)
 endif()
-SET(SRCLIST tt_web.c tt_web_dispatch.c tt_file.c tt_buffer.c tt_malloc_debug.c tt_sha1.c tt_base64.c tt_session.c tt_rbtree.c tt_handler.c tt_msgqueue.c)
+SET(SRCLIST tt_web.c tt_web_dispatch.c tt_file.c tt_buffer.c tt_malloc_debug.c tt_sha1.c tt_base64.c tt_session.c tt_rbtree.c tt_handler.c tt_msgqueue.c tt_semaphore.c)
 
 SET(LIBRARY_OUTPUT_PATH "${CMAKE_BINARY_DIR}/lib")
 SET(EXECUTABLE_OUTPUT_PATH "${CMAKE_BINARY_DIR}/bin")

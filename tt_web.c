@@ -102,7 +102,7 @@ typedef enum E_HTTP_JUDGE {
 typedef struct ST_HTTP_INNER_MSG {
 	char *name; /* message name */
 	int is_sync; /* 0 means async, not 0 means sync */
-	int (*callback)(int ret, void *arg); /* callback function, NULL means block */
+	int (*callback)(int ret, void *arg); /* callback function */
 	void *arg; /* args of callback */
 	MSG_Q *resp_msgq; /* message queue for read return value of callback */
 	int ref_cnt; /* reference count of message queue */
@@ -149,7 +149,7 @@ static size_t g_max_entity_len = 104857600; /* max value allowed of the length o
 static time_t g_max_active_interval = 0; /* max interval allowed of the duration of recv, uint: second, default: 5, 0 means no limit */
 static time_t g_recv_timeout = 0; /* max duration allowed per request, unit: second, default: 60, 0 means no limit */
 static MSG_Q g_web_inner_msg; /* the msg queue of web server */
-static HTTP_INNER_MSG *g_web_inner_msg_head = NULL; /* the msgs that wait free, will be freed if ref == 0 */
+static HTTP_INNER_MSG *g_web_inner_msg_head = NULL; /* the msgs that wait free, will be freed if ref_cnt == 0 */
 
 static const char *g_err_500_head = \
 	"HTTP/1.1 500 Internal Server Error\r\n"\
@@ -2446,7 +2446,7 @@ static int msg_queue_check() {
 
 	p_pre = NULL;
 	p_next = NULL;
-	/* clear msg that msg.msgq_ref == 0 */
+	/* clear msg that msg.ref_cnt == 0 */
 	for (p_inner = g_web_inner_msg_head; p_inner != NULL; p_inner = p_next) {
 		p_next = p_inner->next;
 		if (p_inner->ref_cnt == 0) {
@@ -2846,7 +2846,6 @@ int web_server_run() {
 #else
 #define LOCAL_SOCKETPAIR_AF AF_UNIX
 #endif
-	msgq_init(&g_web_inner_msg, 0);
 	if (evutil_socketpair(LOCAL_SOCKETPAIR_AF, SOCK_STREAM, 0, g_msg_fd) != 0) {
 		printf("evutil_socketpair failed.\n");
 		goto exit;
@@ -2907,6 +2906,7 @@ int init_webserver() {
 	} else {
 		emergency_printf("open package.bin failed.\n");
 	}
+	msgq_init(&g_web_inner_msg, 0);
 	tt_handler_register();
 
 #ifndef _WIN32

@@ -5,6 +5,7 @@
 #include <time.h>
 
 /* #include "tt_semaphore.h" use self defined semaphore */
+#include "tt_semaphore.h"
 #ifndef __TT_SEMAPHORE_H__
 	#include <semaphore.h>
 	#define tt_sem_t sem_t
@@ -42,7 +43,6 @@ extern void *msg_get(MSG_Q *msg_q);
 extern void *msg_tryget(MSG_Q *msg_q);
 extern void *msg_timedget(MSG_Q *msg_q, const struct timespec *timeout);
 extern int msg_getvalue(MSG_Q *msg_q, long int *len);
-extern int test_tt_msgqueue();
 
 #ifdef __cplusplus
 }

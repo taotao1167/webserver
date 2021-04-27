@@ -25,6 +25,7 @@ int msgq_init(MSG_Q *msg_q, long int maxlen) {
 	msg_q->maxlen = maxlen;
 	return 0;
 }
+
 int msg_put(MSG_Q *msg_q, void *entry) {
 	pthread_mutex_lock(&(msg_q->lock));
 	if (msg_q->maxlen && msg_q->length >= msg_q->maxlen) {
@@ -53,9 +54,11 @@ int msg_put(MSG_Q *msg_q, void *entry) {
 	tt_sem_post(&(msg_q->semaphore));
 	return 0;
 }
+
 static void *_msg_get(MSG_Q *msg_q) {
 	void *entry = NULL;
 	MSG_Q_ENTRY *tmp = NULL;
+
 	pthread_mutex_lock(&(msg_q->lock));
 	if (NULL == msg_q->head) {
 		pthread_mutex_unlock(&(msg_q->lock));
@@ -72,8 +75,10 @@ static void *_msg_get(MSG_Q *msg_q) {
 	pthread_mutex_unlock(&(msg_q->lock));
 	return entry;
 }
+
 void *msg_get(MSG_Q *msg_q) {
 	int ret = 0;
+
 	while (1) {
 		ret = tt_sem_wait(&(msg_q->semaphore));
 		if (ret != 0) {
@@ -87,8 +92,10 @@ void *msg_get(MSG_Q *msg_q) {
 	}
 	return _msg_get(msg_q);
 }
+
 void *msg_tryget(MSG_Q *msg_q) {
 	int ret = 0;
+
 	while (1) {
 		ret = tt_sem_trywait(&(msg_q->semaphore));
 		if (ret != 0) {
@@ -102,10 +109,12 @@ void *msg_tryget(MSG_Q *msg_q) {
 	}
 	return _msg_get(msg_q);
 }
+
 #ifndef __TT_SEMAPHORE_H__
 void *msg_timedget(MSG_Q *msg_q, const struct timespec *timeout) {
 	int ret = 0;
 	struct timespec abs_timeout;
+
 	clock_gettime(CLOCK_REALTIME, &abs_timeout);
 	abs_timeout.tv_sec += timeout->tv_sec;
 	abs_timeout.tv_nsec += timeout->tv_nsec;
@@ -129,6 +138,7 @@ void *msg_timedget(MSG_Q *msg_q, const struct timespec *timeout) {
 #else
 void *msg_timedget(MSG_Q *msg_q, const struct timespec *timeout) {
 	int ret = 0;
+
 	while (1) {
 		ret = tt_sem_timedwait(&(msg_q->semaphore), timeout);
 		if (ret != 0) {
@@ -142,22 +152,24 @@ void *msg_timedget(MSG_Q *msg_q, const struct timespec *timeout) {
 	}
 	return _msg_get(msg_q);
 }
-
 #endif
+
 int msg_getvalue(MSG_Q *msg_q, long int *len) {
 	pthread_mutex_lock(&(msg_q->lock));
 	*len = msg_q->length;
 	pthread_mutex_unlock(&(msg_q->lock));
 	return 0;
 }
+
 int msgq_destroy(MSG_Q *msg_q) {
-	MSG_Q_ENTRY *pcur = NULL, *pnext = NULL;
+	MSG_Q_ENTRY *p_cur = NULL, *p_next = NULL;
+
 	tt_sem_destroy(&(msg_q->semaphore));
 	pthread_mutex_destroy(&(msg_q->lock));
-	for (pcur = msg_q->head; pcur != NULL; pcur = pnext) {
-		pnext = pcur->next;
-		MY_FREE(pcur->content);
-		MY_FREE(pcur);
+	for (p_cur = msg_q->head; p_cur != NULL; p_cur = p_next) {
+		p_next = p_cur->next;
+		MY_FREE(p_cur->content);
+		MY_FREE(p_cur);
 	}
 	msg_q->head = NULL;
 	msg_q->tail = NULL;

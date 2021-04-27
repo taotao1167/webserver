@@ -8,7 +8,7 @@ LIBNAME := lib/libwebserver.a
 
 #source file
 OBJS_C := tt_web.o tt_web_dispatch.o tt_file.o tt_buffer.o tt_malloc_debug.o \
-	tt_sha1.o tt_base64.o tt_session.o tt_rbtree.o tt_handler.o tt_msgqueue.o
+	tt_sha1.o tt_base64.o tt_session.o tt_rbtree.o tt_handler.o tt_msgqueue.o tt_semaphore.o
 
 OBJS_CPP :=
 
