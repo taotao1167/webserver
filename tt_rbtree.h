@@ -1,39 +1,41 @@
 #ifndef __TT_RBTREE_H__
 #define __TT_RBTREE_H__
 
-#define RED    0    // red node
-#define BLACK  1    // black node
+#include <stdint.h>
 
-typedef struct RBTreeNode{
-	unsigned char color;
-	void *payload;
-	struct RBTreeNode *left;
-	struct RBTreeNode *right;
-	struct RBTreeNode *parent;
-}Node;
+typedef union rbt_data {
+	void *ptr;
+	int fd;
+	uint32_t u32;
+	uint64_t u64;
+}rbt_data;
 
-typedef struct RBTreeST{
-	Node *root;
-	void *(*getkey)(void *payload);
-	int (*compare)(void *key1, void *key2);
-	void (*keyprint)(void *key);
-	void (*freepayload)(void **payload);
-}RBTree;
+typedef struct rbt_node {
+	rbt_data key;
+	rbt_data value;
+	unsigned char is_black;
+	struct rbt_node *left;
+	struct rbt_node *right;
+	struct rbt_node *parent;
+}rbt_node;
 
-extern void RBT_init(RBTree *tree, \
-		void *(*getkey)(void *payload), \
-		int (*compare)(void *key1, void *key2), \
-		void (*keyprint)(void *key), \
-		void (*freepayload)(void **payload));
+typedef int (*tt_rbt_compare_cb)(rbt_data key1, rbt_data key2);
+typedef void (*tt_rbt_free_cb)(rbt_node *node);
+typedef void (*tt_rbt_print_cb)(rbt_node *node);
 
-extern int RBT_insert(RBTree *tree, void *payload);
-extern void RBT_delete(RBTree *tree, void *key);
-extern void RBT_destroy(RBTree *tree);
-extern void RBT_preorder(RBTree tree);
-extern void RBT_inorder(RBTree tree);
-extern void RBT_postorder(RBTree tree);
-extern void* RBT_search(RBTree tree, void *key);
-extern void RBT_print(RBTree tree);
+typedef struct rbt {
+	struct rbt_node *root;
+	tt_rbt_compare_cb compare_cb;
+	tt_rbt_free_cb free_cb;
+	tt_rbt_print_cb print_cb;
+}rbt;
+
+extern int tt_rbt_init(rbt *tree, tt_rbt_compare_cb compare_cb, tt_rbt_print_cb print_cb, tt_rbt_free_cb free_cb);
+extern int tt_rbt_insert(rbt *tree, rbt_data key, rbt_data value);
+extern rbt_node *tt_rbt_search(rbt *tree, rbt_data key);
+extern int tt_rbt_delete(rbt *tree, rbt_data key);
+extern void tt_rbt_print(rbt *tree);
+extern void tt_rbt_destroy(rbt *tree);
 
 #endif
 

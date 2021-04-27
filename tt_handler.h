@@ -5,12 +5,7 @@
 extern "C" {
 #endif
 
-typedef struct ST_HTTP_HANDLER{
-	char *path;
-	int (*callback)(HTTP_FD *);
-}HTTP_HANDLER;
-
-extern void tt_handler_init();
+extern int tt_handler_init();
 extern int tt_handler_add(const char *path, int (*handler)(HTTP_FD *));
 extern int tt_handler_del(const char *path);
 extern int (* tt_handler_get(const char *path))(HTTP_FD *);
@@ -23,7 +18,7 @@ typedef struct ST_WS_HANDLER{
 	int (*callback)(HTTP_FD *, E_WS_EVENT);
 }WS_HANDLER;
 
-extern void tt_ws_handler_init();
+extern int tt_ws_handler_init();
 extern int tt_ws_handler_add(const char *path, int (*handler)(HTTP_FD *, E_WS_EVENT));
 extern int tt_ws_handler_del(const char *path);
 extern int (* tt_ws_handler_get(const char *path))(HTTP_FD *, E_WS_EVENT);
@@ -36,7 +31,7 @@ typedef struct ST_MSG_HANDLER{
 	int (*callback)(const char *name, void *buf, size_t len);
 }MSG_HANDLER;
 
-extern void tt_msg_handler_init();
+extern int tt_msg_handler_init();
 extern int tt_msg_handler_add(const char *path, int (*handler)(const char *name, void *payload, size_t payload_len));
 extern int tt_msg_handler_del(const char *path);
 int (* tt_msg_handler_get(const char *name))(const char *name, void *payload, size_t payload_len);
