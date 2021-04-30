@@ -32,9 +32,9 @@ typedef struct rbt {
 
 extern int tt_rbt_init(rbt *tree, tt_rbt_compare_cb compare_cb, tt_rbt_print_cb print_cb, tt_rbt_free_cb free_cb);
 extern int tt_rbt_insert(rbt *tree, rbt_data key, rbt_data value);
-extern rbt_node *tt_rbt_search(rbt *tree, rbt_data key);
+extern rbt_node *tt_rbt_search(const rbt tree, rbt_data key);
 extern int tt_rbt_delete(rbt *tree, rbt_data key);
-extern void tt_rbt_print(rbt *tree);
+extern void tt_rbt_print(const rbt tree);
 extern void tt_rbt_destroy(rbt *tree);
 
 #endif

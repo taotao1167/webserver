@@ -150,14 +150,14 @@ int tt_rbt_insert(rbt *tree, rbt_data key, rbt_data value) {
 	return 0;
 }
 
-rbt_node *tt_rbt_search(rbt *tree, rbt_data key) {
+rbt_node *tt_rbt_search(const rbt tree, rbt_data key) {
 	rbt_node *target = NULL;
 
-	target = tree->root;
+	target = tree.root;
 	while (target != NULL) {
-		if (tree->compare_cb(key, target->key) < 0) {
+		if (tree.compare_cb(key, target->key) < 0) {
 			target = target->left;
-		} else if (tree->compare_cb(key, target->key) > 0) {
+		} else if (tree.compare_cb(key, target->key) > 0) {
 			target = target->right;
 		} else {
 			break;
@@ -271,7 +271,7 @@ static void delete(rbt *tree, rbt_node *node) {
 int tt_rbt_delete(rbt *tree, rbt_data key) {
 	rbt_node *target = NULL;
 
-	target = tt_rbt_search(tree, key);
+	target = tt_rbt_search(*tree, key);
 	if (target == NULL) {
 		printf("not exist.\n");
 		return -1;
@@ -296,8 +296,8 @@ void print_node(tt_rbt_print_cb print_cb, rbt_node *node, int deep) {
 	print_node(print_cb, node->right, deep + 1);
 }
 
-void tt_rbt_print(rbt *tree) {
-	print_node(tree->print_cb, tree->root, 0);
+void tt_rbt_print(const rbt tree) {
+	print_node(tree.print_cb, tree.root, 0);
 }
 
 static void destroy_node(tt_rbt_free_cb free_cb, rbt_node *node) {
@@ -339,10 +339,10 @@ int main() {
 	for (i = 1; i <= test_num; i++) {
 		tt_rbt_insert(&tree, (rbt_data)i, (rbt_data)i);
 	}
-	tt_rbt_print(&tree);
+	tt_rbt_print(tree);
 	if (1) {
 		for (i = 1; i <= test_num; i++) {
-			if (NULL == tt_rbt_search(&tree, (rbt_data)i)) {
+			if (NULL == tt_rbt_search(tree, (rbt_data)i)) {
 				printf("search failed.\n");
 			}
 		}
@@ -350,19 +350,19 @@ int main() {
 		for (i = 1; i <= test_num; i++) {
 			printf("delete %d\n", i);
 			tt_rbt_delete(&tree, (rbt_data)i);
-			tt_rbt_print(&tree);
+			tt_rbt_print(tree);
 		}
 #endif
 #if 1
 		for (i = test_num >> 1; i <= test_num; i++) {
 			printf("delete %d\n", i);
 			tt_rbt_delete(&tree, (rbt_data)i);
-			// tt_rbt_print(&tree);
+			// tt_rbt_print(tree);
 		}
 		for (i = 1; i <= test_num >> 1; i++) {
 			printf("delete %d\n", i);
 			tt_rbt_delete(&tree, (rbt_data)i);
-			// tt_rbt_print(&tree);
+			// tt_rbt_print(tree);
 		}
 #endif
 	} else {

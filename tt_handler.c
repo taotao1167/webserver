@@ -75,7 +75,7 @@ int (* tt_handler_get(const char *path))(HTTP_FD *) {
 	rbt_node *node = NULL;
 
 	key.ptr = (void  *)path;
-	node = tt_rbt_search(&g_http_hanler_tree, key);
+	node = tt_rbt_search(g_http_hanler_tree, key);
 	if (node != NULL) {
 		return (int (*)(HTTP_FD *))(node->value.ptr);
 	}
@@ -83,7 +83,7 @@ int (* tt_handler_get(const char *path))(HTTP_FD *) {
 }
 
 void tt_handler_print() {
-	tt_rbt_print(&g_http_hanler_tree);
+	tt_rbt_print(g_http_hanler_tree);
 }
 
 void tt_handler_destory_all() {
@@ -136,7 +136,7 @@ int (* tt_ws_handler_get(const char *path))(HTTP_FD *, E_WS_EVENT) {
 	rbt_node *node = NULL;
 
 	key.ptr = (void  *)path;
-	node = tt_rbt_search(&g_websocket_hanler_tree, key);
+	node = tt_rbt_search(g_websocket_hanler_tree, key);
 	if (node != NULL) {
 		return (int (*)(HTTP_FD *, E_WS_EVENT))(node->value.ptr);
 	}
@@ -144,7 +144,7 @@ int (* tt_ws_handler_get(const char *path))(HTTP_FD *, E_WS_EVENT) {
 }
 
 void tt_ws_handler_print() {
-	tt_rbt_print(&g_websocket_hanler_tree);
+	tt_rbt_print(g_websocket_hanler_tree);
 }
 
 void tt_ws_handler_destory_all() {
@@ -196,14 +196,14 @@ int (* tt_msg_handler_get(const char *name))(const char *name, void *payload, si
 	rbt_node *node = NULL;
 
 	key.ptr = (void  *)name;
-	node = tt_rbt_search(&g_msg_hanler_tree, key);
+	node = tt_rbt_search(g_msg_hanler_tree, key);
 	if (node != NULL) {
 		return (int (*)(const char *, void *, size_t))(node->value.ptr);
 	}
 	return NULL;
 }
 void tt_msg_handler_print() {
-	tt_rbt_print(&g_msg_hanler_tree);
+	tt_rbt_print(g_msg_hanler_tree);
 }
 void tt_msg_handler_destory_all() {
 	tt_rbt_destroy(&g_msg_hanler_tree);
