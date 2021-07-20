@@ -2182,7 +2182,7 @@ static E_WS_DECODE_RET ws_unpack(HTTP_FD *p_link) {
 		if (p_link->ws_recvq.used <= 125 + 8) { /* payload length is bigger the 125 if use 16 bit, 2+2 bytes (parsed) + 4 bytes (mask) */
 			return WS_DECODE_NEEDMORE;
 		}
-		payload_len = buf[2] << 8 | buf[3] << 1;
+		payload_len = (buf[2] << 8) | buf[3];
 		buf += 4;
 	} else if (payload_len == 127) { /* extended payload length is 64 bit */
 		if (p_link->ws_recvq.used <= 65535 + 14) { /* payload length is bigger the 65535 if use 64 bit, 2+8 bytes (parsed) + 4 bytes (mask) */
@@ -2446,7 +2446,7 @@ static int msg_queue_check() {
 
 	p_pre = NULL;
 	p_next = NULL;
-	/* clear msg that msg.ref_cnt == 0 */
+	/* clear msg that msg.ref == 0 */
 	for (p_inner = g_web_inner_msg_head; p_inner != NULL; p_inner = p_next) {
 		p_next = p_inner->next;
 		if (p_inner->ref_cnt == 0) {
@@ -2858,15 +2858,16 @@ int web_server_run() {
 		goto exit;
 	}
 
-	create_http("default", 4, 20080, ".");
+#define WEB_ROOT "./webserver/static"
+	create_http("default", 4, 20080, WEB_ROOT);
 #ifdef WITH_IPV6
-	create_http("default", 6, 20080, NULL);
+	create_http("default", 6, 20080, WEB_ROOT);
 #endif
 #ifdef WITH_SSL
 	g_default_ssl_ctx = create_ssl_ctx(g_default_svr_cert, g_default_privkey, NULL);
-	create_https("default", 4, 20443, NULL, g_default_ssl_ctx);
+	create_https("default", 4, 20443, WEB_ROOT, g_default_ssl_ctx);
 #ifdef WITH_IPV6
-	create_https("default", 6, 20443, NULL, g_default_ssl_ctx);
+	create_https("default", 6, 20443, WEB_ROOT, g_default_ssl_ctx);
 #endif
 #endif /* WITH_SSL */
 	event_base_dispatch(g_event_base);
