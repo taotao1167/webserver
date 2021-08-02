@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>TEST WebCodec</title>
+	<link rel="stylesheet" href="css/elementui.css" />
+	<link rel="stylesheet" href="css/myapp.css" />
+	<script src="js/vue.js"></script>
+	<script src="js/axios.min.js"></script>
+	<script src="js/elementui.js"></script>
+	<script src="js/libffmpeg.js"></script>
+	<script src="js/video.js"></script>
+	<script src="js/webgl.js"></script>
+</head>
+<body>
+<div id="myapp">
+	<container>
+		<template v-slot:aside>
+			<allmenu></allmenu>
+		</template>
+		<!--replace content for this page begin-->
+		<el-form label-position="left" label-width="100px">
+			<el-form-item label="URL">
+				<el-input placeholder="URL" v-model="formData.wsurl"></el-input>
+			</el-form-item>
+		</el-form>
+		<div>
+			<el-button @click="open_websocket" :disabled="connected">Open</el-button>
+			<el-button @click="close_websocket" :disabled="!connected">Close</el-button>
+		</div>
+		<canvas id="playCanvas"></canvas>
+		<!--replace content for this page end-->
+	</container>
+</div>
+<script src="js/myapp.js"></script>
+<script>
+var g_ws;
+
+function onDecoderError(error) {
+	console.log(error);
+}
+function paintFrameToCanvas(videoFrame) {
+	console.log(videoFrame);
+}
+const g_vdec = new VideoDecoder({
+  output: paintFrameToCanvas,
+  error: onDecoderError
+});
+function init_decoder() {
+	g_vdec.configure({codec: "avc1.42001e"});
+}
+
+var myapp = new Vue({
+		el:"#myapp",
+		data: {
+			connected: false,
+			formData: {
+				wsurl: "ws://" + document.location.host + "/ws/video",
+			}
+		},
+		methods: {
+			open_websocket: function() {
+				if(!window.WebSocket){
+					this.$alert("your browser not support websocket.", "Not Support");
+					return;
+				}
+				g_ws = new WebSocket(this.formData.wsurl);
+				g_ws.onopen = function(){
+					init_decoder();
+					myapp.connected = true;
+					myapp.$notify.success({title:"Success",message:"websocket connected!"});
+				};
+				g_ws.onmessage = function(evt) { 
+					var received_msg = evt.data;
+					received_msg.arrayBuffer().then(function(abuff) {
+						var enc_video = new EncodedVideoChunk({type:"key",timestamp:0,data:abuff})
+						g_vdec.decode(enc_video);
+						delete enc_video;
+					});
+				};
+				g_ws.onclose = function(){
+					myapp.connected = false;
+					myapp.$notify.warning({title:"Closed",message:"websocket closed!"});
+				};
+				g_ws.onerror = function(){
+					myapp.$notify.error({title:"Error",message:"websocket error!"});
+				};
+			},
+			close_websocket: function() {
+				g_ws.close();
+			}
+		}
+	});
+</script>
+</body>
+</html>
