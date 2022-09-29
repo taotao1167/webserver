@@ -1458,7 +1458,7 @@ const char *get_mime_type(const char *p_path) {
 			{".html", "text/html"},
 			{".htm", "text/html"},
 			{".xhtml", "text/html"},
-			{".js", "text/javascript"},
+			{".js", "application/javascript"},
 			{".wasm", "application/wasm"},
 			{".css", "text/css"},
 			{".txt", "text/plain"},
@@ -2284,6 +2284,9 @@ int ws_handshake(HTTP_FD *p_link) {
 				web_set_header(p_link, "Connection", "Upgrade");
 				web_set_header(p_link, "Upgrade", "websocket");
 				web_set_header(p_link, "Sec-WebSocket-Accept", b64_str);
+				if (web_header_str(p_link, "Sec-WebSocket-Protocol", NULL)) {
+					web_set_header(p_link, "Sec-WebSocket-Protocol", web_header_str(p_link, "Sec-WebSocket-Protocol", NULL));
+				}
 				MY_FREE(b64_str);
 				web_fin(p_link, 101);
 				p_link->state = STATE_WS_HANDSHAKE;
@@ -2648,6 +2651,7 @@ exit:
 	}
 	return;
 }
+int ws_perf_send_data();
 static void timer_cb_web(evutil_socket_t fd, short event, void *user_data) {
 	HTTP_FD *p_curlink = NULL, *p_next = NULL;
 	time_t tm_now, tm_last_active, tm_last_req;
@@ -2671,6 +2675,7 @@ static void timer_cb_web(evutil_socket_t fd, short event, void *user_data) {
 		}
 	}
 	session_timeout_check();
+	ws_perf_send_data();
 }
 int destroy_server(WEB_SERVER *p_svr) {
 	if (p_svr->listener != NULL) {
@@ -2813,7 +2818,8 @@ int web_server_run() {
 	}
 	event_assign(&time_ev, g_event_base, -1, EV_PERSIST, timer_cb_web, NULL);
 	evutil_timerclear(&tv);
-	tv.tv_sec = 1;
+	tv.tv_sec = 0;
+	tv.tv_usec = 1000;
 	event_add(&time_ev, &tv);
 
 #ifdef _WIN32
@@ -2833,7 +2839,7 @@ int web_server_run() {
 		goto exit;
 	}
 
-#define WEB_ROOT "./webserver/static"
+#define WEB_ROOT "./static"
 	create_http("default", 4, 20080, WEB_ROOT);
 #ifdef WITH_IPV6
 	create_http("default", 6, 20080, WEB_ROOT);

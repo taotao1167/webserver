@@ -21,6 +21,7 @@ extern "C" {
 typedef struct ST_SESSION_STORAGE{
 	char *key;
 	void *value;
+	void (*value_free)(void *);
 	struct ST_SESSION_STORAGE *next;
 }SESSION_STORAGE;
 
@@ -29,6 +30,8 @@ typedef struct ST_HTTP_SESSION{
 	char session_id[HTTP_SESSION_ID_MAX_LEN + 1];
 	char ip[48]; /* ip address of client */
 	unsigned char isonline; /* is online or not */
+	char *uname;
+	int level;
 	time_t create_time; /* time of create */
 	time_t login_time; /* time of login */
 	time_t active_time; /* time of last active */
@@ -43,9 +46,9 @@ extern HTTP_SESSION *g_http_sessions;
 extern int set_session(HTTP_FD *p_link);
 extern int session_login(HTTP_SESSION *p_session, const char *uname, const int level);
 extern int session_logout(HTTP_SESSION *p_session);
-extern int session_set_storage(HTTP_SESSION *p_session, const char *name, const char *value);
+extern int session_set_storage(HTTP_SESSION *p_session, const char *name, void *value, void (*value_free)(void *));
 extern int session_unset_storage(HTTP_SESSION *p_session, const char *name);
-extern const char *session_get_storage(HTTP_SESSION *p_session, const char *key, const char *default_value);
+extern void *session_get_storage(HTTP_SESSION *p_session, const char *key, void *default_value);
 extern int session_free_storage(SESSION_STORAGE **p_head);
 extern void update_session_expires(HTTP_FD *p_link);
 extern void session_timeout_check(void);

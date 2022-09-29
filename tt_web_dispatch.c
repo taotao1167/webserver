@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #endif
 #ifndef __TT_PLATFORM_H__
 #include "tt_platform.h"
@@ -109,8 +110,8 @@ int http_cgi_signin(HTTP_FD *p_link) {
 	return 0;
 }
 int http_cgi_signout(HTTP_FD *p_link) {
-	if (0 == strcmp(p_link->method, "POST")) {
-		printf("user \"%s\" logout actively.\n", session_get_storage(p_link->session, "uname", "[Unknown]"));
+	if (0 == strcmp(p_link->method, "POST") && p_link->session->isonline) {
+		printf("user \"%s\" logout actively.\n", p_link->session->uname);
 		session_logout(p_link->session);
 		web_printf(p_link, "{\"retCode\":[\"success\"]}");
 		web_fin(p_link, 200);
@@ -377,8 +378,8 @@ int http_session_list(HTTP_FD *p_link) {
 			web_printf(p_link, "\"signin\":\"%04d/%02d/%02d %02d:%02d:%02d\",", l_tm->tm_year + 1900, l_tm->tm_mon + 1, l_tm->tm_mday, l_tm->tm_hour, l_tm->tm_min, l_tm->tm_sec);
 			l_tm = localtime(&(p_cur->heartbeat_expire));
 			web_printf(p_link, "\"heartbeat\":\"%04d/%02d/%02d %02d:%02d:%02d\",", l_tm->tm_year + 1900, l_tm->tm_mon + 1, l_tm->tm_mday, l_tm->tm_hour, l_tm->tm_min, l_tm->tm_sec);
-			web_printf(p_link, "\"uname\":\"%s\",", session_get_storage(p_cur, "uname", "[Unknown]"));
-			web_printf(p_link, "\"level\":\"%s\",", session_get_storage(p_cur, "level", "[Unknown]"));
+			web_printf(p_link, "\"uname\":\"%s\",", p_cur->uname ? p_cur->uname : "[Unknown]");
+			web_printf(p_link, "\"level\":\"%d\",", p_cur->level);
 			web_printf(p_link, "\"online\":\"%02" TIMET_FMT ":%02" TIMET_FMT ":%02" TIMET_FMT "\"", (now - p_cur->login_time) / 3600, ((now - p_cur->login_time) % 3600) / 60, (now - p_cur->login_time) % 60);
 		} else {
 			web_printf(p_link, "\"isOnline\":false,\"signin\":\"--\",\"heartbeat\":\"--\",\"uname\":\"--\",\"level\":\"--\",\"online\":\"--\"");
@@ -867,6 +868,165 @@ int http_ws_test(HTTP_FD *p_link, E_WS_EVENT event) {
 	}
 	return 0;
 }
+static int save_dump(HTTP_FD *p_link) {
+    FILE *out_file = NULL;
+    const char *fname = NULL;
+
+    fname = web_query_str(p_link, "name", "h264dump.data");
+    out_file = fopen(fname, "ab");
+    if (out_file == NULL) {
+        return -1;
+    }
+    fwrite(p_link->ws_data.content, p_link->ws_data.used, 1, out_file);
+    fclose(out_file);
+    return 0;
+}
+int http_ws_dump(HTTP_FD *p_link, E_WS_EVENT event) {
+	switch (event) {
+		case EVENT_ONOPEN:
+			printf("websocket [%s] %s:%u ONOPEN.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		case EVENT_ONMESSAGE:
+			printf("websocket [%s] %s:%u ONMESSAGE.\n", p_link->path, p_link->ip_peer, p_link->port_peer);
+            save_dump(p_link);
+			break;
+		case EVENT_ONCLOSE:
+			printf("websocket [%s] %s:%u ONCLOSE.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		case EVENT_ONERROR:
+			printf("websocket [%s] %s:%u ONERROR.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		case EVENT_ONPING:
+			printf("websocket [%s] %s:%u ONPING.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		case EVENT_ONPONG:
+			printf("websocket [%s] %s:%u ONPONG.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		case EVENT_ONCHUNKED:
+			printf("websocket [%s] %s:%u ONCHUNKED.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		default:
+			printf("websocket [%s] %s:%u unknown event.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+	}
+	return 0;
+}
+double get_time() {
+	struct timeval tv = {0};
+	gettimeofday(&tv, NULL);
+	return (double)tv.tv_sec + tv.tv_usec / 1000000.0;
+}
+typedef struct PerfInfo {
+	int32_t flags;
+	FILE *fin;
+	size_t fsize;
+	size_t foffset;
+	double tm_start; /* sec */
+	double speed; /* Mbps */
+	int64_t sended_5s; /* Bytes */
+	uint8_t *payload;
+	size_t payload_size;
+} PerfInfo;
+static void perfinfo_close(void *_perf_info) {
+	PerfInfo *perf_info = (PerfInfo *)_perf_info;
+	if (perf_info == NULL) {
+		return;
+	}
+	if (perf_info->fin != NULL) {
+		fclose(perf_info->fin);
+		printf("[%.3lf] .h264 closed\n", get_time());
+	}
+	if (perf_info->payload != NULL) {
+		free(perf_info->payload);
+	}
+	free(perf_info);
+}
+int ws_perf_send_data() {
+	HTTP_FD *p_curlink = NULL;
+	double now = 0;
+	PerfInfo *perf_info = NULL;
+	size_t read_size = 0;
+
+	for (p_curlink = g_http_links; p_curlink != NULL; p_curlink = p_curlink->next) {
+		if (p_curlink->state != STATE_WS_CONNECTED) {
+			continue;
+		}
+		perf_info = session_get_storage(p_curlink->session, "perf", NULL);
+		if (perf_info == NULL) {
+			continue;
+		}
+		now = get_time();
+		if (now < perf_info->tm_start + 0.001) {
+			continue;
+		}
+		while (perf_info->sended_5s / (now - perf_info->tm_start) < perf_info->speed) {
+			fseek(perf_info->fin, perf_info->foffset, SEEK_SET);
+			read_size = perf_info->fsize - perf_info->foffset;
+			if (read_size > perf_info->payload_size) {
+				read_size = perf_info->payload_size;
+			}
+			if (perf_info->flags & 1) {
+				fread(perf_info->payload, read_size, 1, perf_info->fin);
+			} else {
+				memset(perf_info->payload, 0x00, read_size);
+			}
+			perf_info->foffset += read_size;
+			if (perf_info->foffset == perf_info->fsize) {
+				printf("[%.3lf] EOF %s\n", get_time(), web_query_str(p_curlink, "fname", "test_20Mbps.h264"));
+				perf_info->foffset = 0;
+			}
+			ws_write(p_curlink, perf_info->payload, read_size);
+			ws_pack(p_curlink, WS_OPCODE_BINARY);
+			perf_info->sended_5s += read_size;
+		}
+		if (now > perf_info->tm_start + 5.0) { /* restart statistics */
+			perf_info->tm_start = now;
+			perf_info->sended_5s = 0;
+		}
+	}
+	return 0;
+}
+int http_ws_perf(HTTP_FD *p_link, E_WS_EVENT event) {
+	PerfInfo *perf_info = NULL;
+	switch (event) {
+		case EVENT_ONOPEN:
+			perf_info = (PerfInfo *)malloc(sizeof(PerfInfo));
+			if (perf_info != NULL) {
+				memset(perf_info, 0x00, sizeof(PerfInfo));
+				perf_info->flags = atoi(web_query_str(p_link, "flags", "65535"));
+				perf_info->speed = atof(web_query_str(p_link, "mbps", "20")) * (1024 * 1024 / 8);
+				perf_info->payload_size = 1024;
+				perf_info->payload = (uint8_t *)malloc(perf_info->payload_size);
+				perf_info->fin = fopen(web_query_str(p_link, "fname", "test_20Mbps.h264"), "rb");
+				perf_info->tm_start = get_time();
+				if (perf_info->fin != NULL) {
+					fseek(perf_info->fin, 0, SEEK_END);
+					perf_info->fsize = ftell(perf_info->fin);
+					fseek(perf_info->fin, 0, SEEK_SET);
+					if (perf_info->fsize > 0) {
+						session_set_storage(p_link->session, "perf", perf_info, perfinfo_close);
+						printf("[%.3lf] .h264 opened\n", get_time());
+					} else {
+						perfinfo_close(perf_info);
+					}
+				} else {
+					perfinfo_close(perf_info);
+				}
+			}
+			printf("websocket [%s] %s:%u ONOPEN.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		case EVENT_ONMESSAGE:
+			printf("websocket [%s] %s:%u ONMESSAGE.\n", p_link->path, p_link->ip_peer, p_link->port_peer);
+            save_dump(p_link);
+			break;
+		case EVENT_ONCLOSE:
+			session_unset_storage(p_link->session, "perf");
+			printf("websocket [%s] %s:%u ONCLOSE.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		case EVENT_ONERROR:
+			printf("websocket [%s] %s:%u ONERROR.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		case EVENT_ONPING:
+			printf("websocket [%s] %s:%u ONPING.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		case EVENT_ONPONG:
+			printf("websocket [%s] %s:%u ONPONG.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		case EVENT_ONCHUNKED:
+			printf("websocket [%s] %s:%u ONCHUNKED.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+		default:
+			printf("websocket [%s] %s:%u unknown event.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
+	}
+	return 0;
+}
 #endif
 
 int http_callback_default(HTTP_FD *p_link) {
@@ -897,6 +1057,7 @@ int http_callback_default(HTTP_FD *p_link) {
 
 	// set cache policy
 	if (0 == strcmp(p_suffix, ".html")) {
+#if 0
 		web_set_header(p_link, "Cache-Control", "public, max-age=30"); //html cached 30 seconds
 		web_set_header(p_link, "Pragma", NULL);
 	} else if (0 == strcmp(p_suffix, ".js")) {
@@ -912,6 +1073,7 @@ int http_callback_default(HTTP_FD *p_link) {
 		web_set_header(p_link, "Cache-Control", "public, max-age=300"); // font cached 5 minutes
 		web_set_header(p_link, "Pragma", NULL);
 	} else {// not cached for other resource
+#endif
 	}
 	if (0 != strcmp(file_etag, web_header_str(p_link, "If-None-Match", ""))) {
 		web_set_header(p_link, "Etag", file_etag);
@@ -927,15 +1089,6 @@ int http_callback_default(HTTP_FD *p_link) {
 		web_fin(p_link, 304);
 	}
 	return 0;
-}
-void tt_webpolling(void) {
-	static time_t tm_expire = (time_t)0;
-	time_t tm_now;
-	tm_now = time(0);
-	if (tm_now > tm_expire) {
-		session_timeout_check();
-		tm_expire = tm_now;
-	}
 }
 
 int msg_test(const char *name, void *buf, size_t len) {
@@ -975,6 +1128,8 @@ void tt_handler_register() {
 #ifdef WITH_WEBSOCKET
 	tt_ws_handler_init();
 	tt_ws_handler_add("/ws/test", http_ws_test);
+	tt_ws_handler_add("/ws/dump", http_ws_dump);
+	tt_ws_handler_add("/ws/perf", http_ws_perf);
 #endif
 
 	tt_msg_handler_init();

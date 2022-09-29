@@ -47,6 +47,18 @@ static HTTP_SESSION *append_session(const char *session_id, char *ip) {
 	g_session_count++;
 	return new_session;
 }
+static void free_storage_item(SESSION_STORAGE *storage) {
+	if (storage == NULL) {
+		return;
+	}
+	if (storage->key != NULL) {
+		MY_FREE(storage->key);
+	}
+	if (storage->value != NULL && storage->value_free) {
+		storage->value_free(storage->value);
+	}
+	MY_FREE(storage);
+}
 int session_unset_storage(HTTP_SESSION *p_session, const char *name) {
 	SESSION_STORAGE *p_pre = NULL, *p_cur = NULL, *p_next = NULL;
 
@@ -62,48 +74,33 @@ int session_unset_storage(HTTP_SESSION *p_session, const char *name) {
 			} else {
 				p_pre->next = p_next;
 			}
-			if (p_cur->key != NULL) {
-				MY_FREE(p_cur->key);
-			}
-			if (p_cur->value != NULL) {
-				MY_FREE(p_cur->value);
-			}
-			MY_FREE(p_cur);
+			free_storage_item(p_cur);
 		} else {
 			p_pre = p_cur;
 		}
 	}
 	return 0;
 }
-int session_set_storage(HTTP_SESSION *p_session, const char *name, const char *value) {
+int session_set_storage(HTTP_SESSION *p_session, const char *name, void *value, void (*value_free)(void *)) {
+	int ret = -1;
 	SESSION_STORAGE *p_new = NULL, *p_tail = NULL;
 
-	if (!name || name[0] == '\0') {
-		return -1;
+	if (name == NULL || name[0] == '\0') {
+		goto func_end;
 	}
 	session_unset_storage(p_session, name); /* cover the old data */
 	/* add information to p_session->storage */
 	p_new = (SESSION_STORAGE *)MY_MALLOC(sizeof(SESSION_STORAGE));
 	if (p_new == NULL) {
-		return -1;
+		goto func_end;
 	}
 	memset(p_new, 0x00, sizeof(SESSION_STORAGE));
-	p_new->key = (char *)MY_MALLOC(strlen(name) + 1);
+	p_new->value = value;
+	p_new->value_free = value_free;
+	p_new->key = strdup(name);
 	if (p_new->key == NULL) {
-		MY_FREE(p_new);
-		return -1;
+		goto func_end;
 	}
-	strcpy(p_new->key, name);
-	if (value == NULL) {
-		value = "";
-	}
-	p_new->value = (char *)MY_MALLOC(strlen(value) + 1);
-	if (p_new->value == NULL) {
-		MY_FREE(p_new->key);
-		MY_FREE(p_new);
-		return -1;
-	}
-	strcpy((char *)p_new->value, value);
 	if (p_session->storage == NULL) {
 		p_session->storage = p_new;
 	} else {
@@ -114,13 +111,24 @@ int session_set_storage(HTTP_SESSION *p_session, const char *name, const char *v
 			}
 		}
 	}
-	return 0;
+	ret = 0;
+func_end:
+	if (ret != 0) {
+		if (p_new != NULL) {
+			free_storage_item(p_new);
+		} else {
+			if (value_free != NULL) {
+				value_free(value);
+			}
+		}
+	}
+	return ret;
 }
-const char *session_get_storage(HTTP_SESSION *p_session, const char *key, const char *default_value) {
+void *session_get_storage(HTTP_SESSION *p_session, const char *key, void *default_value) {
 	SESSION_STORAGE *p_cur = NULL;
 	for (p_cur = p_session->storage; p_cur != NULL; p_cur = p_cur->next) {
 		if (0 == strcmp(p_cur->key, key)) {
-			return (char *)p_cur->value;
+			return p_cur->value;
 		}
 	}
 	return default_value;
@@ -130,13 +138,7 @@ int session_free_storage(SESSION_STORAGE **p_head) {
 	SESSION_STORAGE *p_cur = NULL, *p_next = NULL;
 	for (p_cur = *p_head; p_cur != NULL; p_cur = p_next) {
 		p_next = p_cur->next;
-		if (p_cur->key != NULL) {
-			MY_FREE(p_cur->key);
-		}
-		if (p_cur->value != NULL) {
-			MY_FREE(p_cur->value);
-		}
-		MY_FREE(p_cur);
+		free_storage_item(p_cur);
 	}
 	*p_head = NULL;
 	return 0;
@@ -154,19 +156,13 @@ static int session_free(HTTP_SESSION **p_session) {
 }
 
 int session_login(HTTP_SESSION *p_session, const char *uname, const int level) {
-	char sz_level[20] = {0};
 	time_t now;
 	now = time(0);
 	p_session->heartbeat_expire = now + 12;
 	p_session->isonline = 1;
 	p_session->login_time = now;
-	if (0 != session_set_storage(p_session, "uname", uname)) {
-		return -1;
-	}
-	sprintf(sz_level, "%d", level);
-	if (0 != session_set_storage(p_session, "level", sz_level)) {
-		return -1;
-	}
+	p_session->uname = strdup(uname);
+	p_session->level = level;
 	return 0;
 }
 
@@ -190,11 +186,11 @@ void session_timeout_check(void) {
 	for (p_cur = g_http_sessions; p_cur != NULL; p_cur = p_next) {
 		p_next = p_cur->next;
 		if (p_cur->isonline) {
-			if (now >= p_cur->heartbeat_expire) {
-				printf("user \"%s\" logout because of no heartbeat.\n", session_get_storage(p_cur, "uname", "[Unknown]"));
+			if (0 && now >= p_cur->heartbeat_expire) {
+				printf("user \"%s\" logout because of no heartbeat.\n", p_cur->uname);
 				session_logout(p_cur);
 			} else if (now >= p_cur->expire) {
-				printf("user \"%s\" logout because of timeout.\n", session_get_storage(p_cur, "uname", "[Unknown]"));
+				printf("user \"%s\" logout because of timeout.\n", p_cur->uname);
 				session_logout(p_cur);
 			}
 			p_pre = p_cur;
