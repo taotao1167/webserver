@@ -1,36 +1,20 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <unistd.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <stdarg.h>
 #include <time.h>
-#include <signal.h>
 #include <errno.h>
 #include <ctype.h>
 #ifdef _WIN32
 	#include <ws2tcpip.h>
-#else
-	#define __USE_GNU
+#elif __linux__
+	#include <unistd.h>
+	#include <signal.h>
+	#include <sys/time.h>
 	#include <sys/socket.h>
 	#include <netinet/in.h>
-	#include <netinet/tcp.h>
-	#include <arpa/inet.h>
-#endif
-#include <event2/bufferevent.h>
-#ifdef WITH_SSL
-#include <event2/bufferevent_ssl.h>
-#endif
-#include <event2/buffer.h>
-#include <event2/listener.h>
-#include <event2/util.h>
-#include <event2/event.h>
-#ifdef EVENT__HAVE_SYS_TIME_H
-#include <sys/time.h>
-#endif
-#include <event2/event_struct.h>
-
-#ifndef __TT_PLATFORM_H__
-#include "tt_platform.h"
 #endif
 #ifndef __TT_BUFFER_H__
 #include "tt_buffer.h"
@@ -60,25 +44,8 @@
 //#define error_printf(fmt,...)
 #define notice_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
 //#define notice_printf(fmt, ...)
-#if 0  // print timestamp, for optimize server
-	#include <sys/time.h>
-	struct timeval g_tv;
-	#define debug_printf(fmt, ...) gettimeofday(&g_tv, NULL); printf("[%ld.%06ld] ", g_tv.tv_sec, g_tv.tv_usec); printf(fmt, ##__VA_ARGS__)
-#else
-	#define debug_printf(fmt, ...)
-	// #define debug_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
-#endif
-
-#ifdef WATCH_RAM
-#include "tt_malloc_debug.h"
-#define MY_MALLOC(x) my_malloc((x), __FILE__, __LINE__)
-#define MY_FREE(x) my_free((x), __FILE__, __LINE__)
-#define MY_REALLOC(x, y) my_realloc((x), (y), __FILE__, __LINE__)
-#else
-#define MY_MALLOC(x) malloc((x))
-#define MY_FREE(x) free((x))
-#define MY_REALLOC(x, y) realloc((x), (y))
-#endif
+// #define debug_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#define debug_printf(fmt, ...)
 
 /* map status code and status string */
 typedef struct ST_HTTP_CODE_MAP {
@@ -133,14 +100,8 @@ extern int req_dispatch(HTTP_FD *p_link);
 extern int msg_dispatch(const char *name, void *buf, size_t len);
 extern void tt_handler_register();
 
-#ifdef WITH_SSL
-SSL_CTX *g_default_ssl_ctx = NULL;
-#endif
-
-struct event_base *g_event_base = NULL;
 WEB_SERVER *g_servers = NULL;
 HTTP_FD *g_http_links = NULL;
-evutil_socket_t g_msg_fd[2] = {0};
 
 static const char *g_hostname = "Border Collie"; /* Server Name, will show at response */
 static size_t g_init_recv_space = 1024; /* init length of HTTP_FD->recvbuf */
@@ -163,102 +124,202 @@ static const char *g_err_500_head = \
 static const char *g_err_500_entity = \
 	"<html><h1>500 Internal Server Error</h1></html>";
 
-#ifdef WITH_SSL
-const char *g_default_ca_cert = \
-		"-----BEGIN CERTIFICATE-----\r\n"\
-		"MIIFrjCCA5agAwIBAgIUeyy6eUozjrHZx24o47kmMNttOCowDQYJKoZIhvcNAQEL\r\n"\
-		"BQAwaDELMAkGA1UEBhMCWFgxDTALBgNVBAgMBFhYWFgxDTALBgNVBAcMBFhYWFgx\r\n"\
-		"HjAcBgNVBAoMFVhYWFggVGVjaG5vbG9neS4gTHRkLjEbMBkGA1UEAwwSWFhYWCBU\r\n"\
-		"ZWNobm9sb2d5IENBMB4XDTIxMDgwMjA3Mzc1MFoXDTIzMDgwMjA3Mzc1MFowaDEL\r\n"\
-		"MAkGA1UEBhMCWFgxDTALBgNVBAgMBFhYWFgxDTALBgNVBAcMBFhYWFgxHjAcBgNV\r\n"\
-		"BAoMFVhYWFggVGVjaG5vbG9neS4gTHRkLjEbMBkGA1UEAwwSWFhYWCBUZWNobm9s\r\n"\
-		"b2d5IENBMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAyMs2BKG+4fO2\r\n"\
-		"71KuIk3b14QEc2xmOPl0JOVhj59yOQvZAIDG4aSukqUY/eSqtANbCuN6aoFC6CVv\r\n"\
-		"myTpF/WaLVPZsvmYiDayY+/1GT5Ux2j2nDhYCioM8kr7RTGdLreliu67QHZuzC+m\r\n"\
-		"ND+XONwYIOpy72sIWM6A221XJeoAiDCnM8LG6Sc50b7oNTt2apLcBbuqQ4955xF8\r\n"\
-		"slVfnIJJBemHkKEVG8UfdINDWpceP6mlMhxpgflnl9DC6hIrXNdZ7n8Fd5HTsjm6\r\n"\
-		"GNRA+hJvaRelFMk7F43fDlP179NUawjxUvX5I32yHYXFnJoTTAqMGYs+FRVXqHN+\r\n"\
-		"28k9hlEzAlNepE+3XveovtIETsiOMdvofpcnWnDXa9nvW8+ubvMh2ovt2QaZ6Jdg\r\n"\
-		"0P62NcNjKrWmXgvaz3i1i2Jrwr2kePunlL0jV74DcrVLM2RhiwUNa+ll7+W8FVK5\r\n"\
-		"Jge4UMkW7Iyifld2HL/nXsbcsFTnGBeeUzjEprz+xB9YoMsdQL6R2nZfv4FdcwCz\r\n"\
-		"hSt/mLjo5hAjwkhLmNs8U2CaXl2aQtsWZg+XKddbcsqvc8lYMaGYqvNgBSmQ0Ezr\r\n"\
-		"TYuapshYkInoie6l5JxvcOhlP/0S0rBxyGsNkGHSGVajSmjbQx7EluLjJ0UdG8x2\r\n"\
-		"D26ZeHC4v9QJ5Fb25do36hCNPKbTrIUCAwEAAaNQME4wHQYDVR0OBBYEFK4oCj0l\r\n"\
-		"C9/BuSRLTICN4wO0DDP1MB8GA1UdIwQYMBaAFK4oCj0lC9/BuSRLTICN4wO0DDP1\r\n"\
-		"MAwGA1UdEwQFMAMBAf8wDQYJKoZIhvcNAQELBQADggIBAISxISFTD1jFFY0u388h\r\n"\
-		"vE3+2jpazK3d0u2QmJEkWhwGn7OYZMkEHGhMZCFD7dwZ6hMSo38ZIa5v5+ojPjbE\r\n"\
-		"odx6bqDIkYGCPBLT+hDqcgB5WnAjq9+6OJ59dB9MscZeRHVhwHy46bBbEQmQzC1O\r\n"\
-		"xbXTc9TPQkzyeJhSmsYxzh6/KYwWNDga4rSar58OipTfTaLmmu4QuiLKhCDS15Jx\r\n"\
-		"ujvKgaWmFulwqgoz3sSLT+i5lEYvWmR1g6ymwu81zxzd4YEaQrsMclcTVn74qs6G\r\n"\
-		"jvMLgy/civIhghRUllP/HKO77N0YIqdpW3WMGgmcVa10NwSj4yUUKzxemPwEazH4\r\n"\
-		"EOA/Cb5qoWbArsYB7rWcg+ROZRIIrJYJGXd3zuKKawfOZd6WwBweJQ5/9CPzyNh/\r\n"\
-		"IXG+wxTwfqWqEaFl1WYd7T6VD7TTm5mUM72Bee/W+UVISNwfcMwc78wro6+xd7Vg\r\n"\
-		"FXrX1ZS/LiKhWbnCwyjNbYRrcCkcUr7w23CRLCDJFnh+oaetbkxlyBj4RPGdUEm8\r\n"\
-		"PpA5ozDPYspu4sEnzf/x7yXznC/TTp3apRjTTRMN0jBfDCM9nGdZL6M23JyzLO80\r\n"\
-		"4QYVCQTlRO+cJLihmPgJXpG/w17o5uf71BsIKMdI8xvbi/ts783vlaIr54RE+CVF\r\n"\
-		"Fmu25zeyjR/6ewbPzwckxH9W\r\n"\
-		"-----END CERTIFICATE-----\r\n";
+/* tcp/ssl backend begin */
+static void on_timer_web(void *userdata);
+#include "hv/hloop.h"
+typedef struct Backend {
+	hio_t *io;
+	void (* on_accept)(void *backend, void *userdata, struct sockaddr *cli_addr);
+	void *userdata;
+} Backend;
 
-const char *g_default_svr_cert = \
-		"-----BEGIN CERTIFICATE-----\r\n"\
-		"MIIEfzCCAmegAwIBAgIUU0Glm2MRRXj+dCtiNieaKyDjZkowDQYJKoZIhvcNAQEL\r\n"\
-		"BQAwaDELMAkGA1UEBhMCWFgxDTALBgNVBAgMBFhYWFgxDTALBgNVBAcMBFhYWFgx\r\n"\
-		"HjAcBgNVBAoMFVhYWFggVGVjaG5vbG9neS4gTHRkLjEbMBkGA1UEAwwSWFhYWCBU\r\n"\
-		"ZWNobm9sb2d5IENBMB4XDTIxMDgwMjA3MzgyM1oXDTIzMDgwMjA3MzgyM1owXDEL\r\n"\
-		"MAkGA1UEBhMCWFgxDTALBgNVBAgMBFhYWFgxDTALBgNVBAcMBFhYWFgxHjAcBgNV\r\n"\
-		"BAoMFVhYWFggVGVjaG5vbG9neS4gTHRkLjEPMA0GA1UEAwwGcGkudGVjMIIBIjAN\r\n"\
-		"BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApbbhK53WvpZPOY3tngjx+i3xjesQ\r\n"\
-		"aqhD0RNLqohIcEUYvEMk+x8FjWdiGK3PyxkMeN40kfkJXgiEZLfcLdVnuo8QSthC\r\n"\
-		"bUMarGwGLjMTaFtjpmSf7ngBBUFEo0B35rzcoHKaCICxzVhXyToHN9Beg5t/ELaj\r\n"\
-		"6UXZSAoXWczWg7uF3iq7LKgunIP2p/xGNFNrdUDzcBqvCHrI0l1Ovxec2bn8V5r+\r\n"\
-		"m0hgwg/ySH0Y2+vsprD9nBim5OV9qmgCIP6z0fTR5x89WxeKMql/T7Qst+3nacfD\r\n"\
-		"bBNTc1FdtmEeC2wq7QNQPSZ1Fz4vcO3gPdKIg2D5RBK5I0YT4f8J9bfyAQIDAQAB\r\n"\
-		"oy0wKzApBgNVHREEIjAgggZwaS50ZWOCBWJqLnBpggliai5waS50ZWOHBMCoOGUw\r\n"\
-		"DQYJKoZIhvcNAQELBQADggIBAAAqsx2GePTX2TVVnoug6G6PjWqgyrsHl7rQxufJ\r\n"\
-		"Y9M5MVahfIlbP7uHFzM5z0gH8Pc64mJ6q6u0TGveF7JPp84ntcUJS6IFQUt5xkeC\r\n"\
-		"WbMErwgVU0Kwvozl5nYF7hvERZjFpA4AxBaMa0MBRZFgA3XzJ2GvTy0Bkzbt7wbP\r\n"\
-		"wv2Wan17g15lNh/uX8B9Ubv/TphuwJth8bGSqgyKi6mGz+58ynvMSDb37Y74cxb0\r\n"\
-		"SWQ58uX+GEw3tg/9vF9O9p0+XP64/U9rlrFAgVj12gFal9nLT5IPJ1aJEx+8Ucrb\r\n"\
-		"fTsTkAfHExOp4sbP3dJSAhiHrsl68zMkhWMycslNxPIIVhyhzgEetaf8VkVqYI+s\r\n"\
-		"8hxZPAajqEsZtpUy39uHiHO15LvPPQ2DgvyahC/NNvB80fVVrpbiVC/DXXxovWfO\r\n"\
-		"kiLmcBaYPnkVZFiN9TtlIEBPFgXCrz23++cWlkcdtmIhzw09ehTlR53bVpB8QmVy\r\n"\
-		"0a821nEpQ6/wR3cpb99+MWqWXaDm+YBEZ+hMhXJMoU/K3JkDSs1yqtwwMNbACvHw\r\n"\
-		"ppi1J6Li40nzChbpwhrxD4tZzlEVkQaBYClqsOql+yQfiP/MRUlmtYQ7UKe5AvoU\r\n"\
-		"8MFaGZwwHUKjULFR4RkR9BLKXR2cn92B66uGA1ARFrQeP8OqXIxVVZVCa4FaLkfo\r\n"\
-		"Aumv\r\n"\
-		"-----END CERTIFICATE-----\r\n";
+typedef struct BackendIo {
+	hio_t *io;
+	void (* on_read)(void *backendio, void *userdata, uint8_t *content, size_t size);
+	void (* on_write)(void *backendio, void *userdata, const uint8_t *content, size_t size);
+	void (* on_close)(void *backendio, void *userdata);
+	void *userdata;
+} BackendIo;
 
-const char *g_default_privkey = \
-		"-----BEGIN RSA PRIVATE KEY-----\r\n"\
-		"MIIEpAIBAAKCAQEApbbhK53WvpZPOY3tngjx+i3xjesQaqhD0RNLqohIcEUYvEMk\r\n"\
-		"+x8FjWdiGK3PyxkMeN40kfkJXgiEZLfcLdVnuo8QSthCbUMarGwGLjMTaFtjpmSf\r\n"\
-		"7ngBBUFEo0B35rzcoHKaCICxzVhXyToHN9Beg5t/ELaj6UXZSAoXWczWg7uF3iq7\r\n"\
-		"LKgunIP2p/xGNFNrdUDzcBqvCHrI0l1Ovxec2bn8V5r+m0hgwg/ySH0Y2+vsprD9\r\n"\
-		"nBim5OV9qmgCIP6z0fTR5x89WxeKMql/T7Qst+3nacfDbBNTc1FdtmEeC2wq7QNQ\r\n"\
-		"PSZ1Fz4vcO3gPdKIg2D5RBK5I0YT4f8J9bfyAQIDAQABAoIBABow20m/eo9IxmC8\r\n"\
-		"U8/kbgoydLkPa9rPmVhUCmN7gqdr5Ers+c1Oy9vbeR+ZaPwai2QXCov/pkFca0BX\r\n"\
-		"5s6/qdNMhTCvGWCXeIHD2P44SFr4BrnnsXdJNDAWbri2mby4IM6jDkFFxdREoCtH\r\n"\
-		"pphlsGpwixajJyjZR0whfCtPOqA7I/7kIut/1JvkOjG8aGlhpdcdHuTTa6tKvXOU\r\n"\
-		"KscFlMTFlSdEufBk1oblgGnmEv7l8atvlReePi4eFIn0m4GOdYkQq8cz9rVib/1O\r\n"\
-		"i4avUIFowwcqXb7tpBtJma8py41rQzGA8kw04InM6FX1FpJHHroCSo1Pn4Y1wP8y\r\n"\
-		"UgskH1kCgYEA0xriwJePmDReo/Ce8DeuVhf7VSKkzIIYk1GUIkCs/H0zVLaTyCYn\r\n"\
-		"+FkOsur/VEFC+fn9rQmbRzyoXjZZ/92PmClbxQPLf4yLQTLnYDS46QXzMXHSL/71\r\n"\
-		"ih3Krjb6dCX46qRbQY372TOUfK3P70DFx1GAL3gMmv4eKIKF+lrx6dcCgYEAyPTO\r\n"\
-		"ocPWsbMDHXsLbRN68EXRdO4/8a61bnBiZjL6FB5iIKm7HAi0373gS2RATcyDEfq4\r\n"\
-		"V/UFXJVmO5QOqiylwEYHTwdq7S1gaAwzl9Vc3CuL+dab1lKvre08OCdg3NQ6cMGP\r\n"\
-		"TDJTXuAeGn7E2s9VlxoHCJVZfHZjTg/bfuK9d+cCgYBuDDHwnBGrEoHTjHgOWbh0\r\n"\
-		"AQRwGSM3yQnuojRKttR2uv2rR5I6YEmt2R8kfgSkc3DqxztKnRtpQ2Gx2zuHeoSE\r\n"\
-		"merRBW1sDGP7lQGw0Usjjop8WA1uH8b4PRePQfHF4pWkHBHGVrHXRGA/rowa+PUh\r\n"\
-		"NodQN5C6q4YlMAWPwSEi+QKBgQCI2ibKBUt1cpqBfiUW4DhN3s442nOTjE4kasao\r\n"\
-		"ILkr8FEVO2GgQtGiuXVBAoHEOa1dFihqRgOjvF6F3ltqSsOKQGaDzGJmKQvJb93G\r\n"\
-		"3dfCXKmTuDIib+cSBEiJWU/es20lErwawP8D0o7Nrl0zQhVgtKnrj4IEf787DxOE\r\n"\
-		"wrcTKwKBgQCJMdDc/KFx5xd470DolOgOK4dvP9SRJZ/jXnIVcBxZmtp5PrKKDu5j\r\n"\
-		"HHITM8SvnZ6Y5OueIRMuw1eMmZKONXVttmU8twlpHmQKgqw0wX4voC8wyOh6abwA\r\n"\
-		"lFAwOrygoU9Dw30FP1agO/icIAPUY1RUjRJoHW/VrPtPgc9Zu6PoWg==\r\n"\
-		"-----END RSA PRIVATE KEY-----\r\n";
-#endif /* endof WITH_SSL */
+static hloop_t* g_hv_loop = NULL;
+static void on_backend_timer(htimer_t* timer) {
+	on_timer_web(hevent_userdata(timer));
+}
+static void backend_loop_create() {
+	g_hv_loop = hloop_new(0);
+	htimer_add(g_hv_loop, on_backend_timer, 1, INFINITE);
+}
+static void backend_loop_run() {
+	hloop_run(g_hv_loop);
+	hloop_free(&g_hv_loop);
+}
+void on_backend_close(hio_t* io) {
+	void *_backendio = NULL;
+	BackendIo *backendio = NULL;
 
-void hexdump(void *_buf, size_t size) {
+	_backendio = hevent_userdata(io);
+	backendio = (BackendIo *)_backendio;
+	if (backendio->on_close) {
+		backendio->on_close(backendio, backendio->userdata);
+	}
+}
+void on_backend_read(hio_t* io, void* buf, int readbytes) {
+	void *_backendio = NULL;
+	BackendIo *backendio = NULL;
+
+	_backendio = hevent_userdata(io);
+	backendio = (BackendIo *)_backendio;
+	if (backendio->on_read) {
+		backendio->on_read(backendio, backendio->userdata, (uint8_t *)buf, readbytes);
+	}
+}
+void on_backend_write(hio_t* io, const void* buf, int writebytes) {
+	void *_backendio = NULL;
+	BackendIo *backendio = NULL;
+
+	_backendio = hevent_userdata(io);
+	backendio = (BackendIo *)_backendio;
+	if (backendio->on_write) {
+		backendio->on_write(backendio, backendio->userdata, (const uint8_t *)buf, writebytes);
+	}
+}
+
+static void on_backend_accept(hio_t* io) {
+	void *_backend = NULL;
+	Backend *backend = NULL;
+	BackendIo *backendio = NULL;
+
+	_backend = hevent_userdata(io);
+	backend = (Backend *)_backend;
+	if (backend->on_accept != NULL) {
+		backendio = (BackendIo *)malloc(sizeof(BackendIo));
+		memset(backendio, 0x00, sizeof(BackendIo));
+		backendio->io = io;
+		backend->on_accept(backendio, backend->userdata, hio_peeraddr(io));
+	}
+	hevent_set_userdata(io, backendio);
+	hio_setcb_read(io, on_backend_read);
+	hio_setcb_write(io, on_backend_write);
+	hio_setcb_close(io, on_backend_close);
+}
+static void backend_destroy(void *_backend) {
+	Backend *backend = NULL;
+
+	backend = (Backend *)_backend;
+	if (backend == NULL) {
+		goto func_end;
+	}
+	if (backend->io != NULL) {
+		hio_close(backend->io);
+	}
+	free(backend);
+func_end:
+	return;
+}
+static void *backend_create(int ip_version, unsigned short port, const char *crt_file, const char *key_file, void (* on_accept)(void *backend, void *userdata, struct sockaddr *cli_addr), void *userdata) {
+	int ret = -1;
+	hssl_ctx_opt_t ssl_param;
+	Backend *backend = NULL;
+	const char *host = NULL;
+
+	backend = (Backend *)malloc(sizeof(Backend));
+	if (backend == NULL) {
+		goto func_end;
+	}
+	if (ip_version == 6) {
+		host = "::";
+	} else {
+		host = "0.0.0.0";
+	}
+	if (crt_file != NULL) {
+		backend->io = hloop_create_ssl_server(g_hv_loop, host, port, on_backend_accept);
+		if (backend->io == NULL) {
+			goto func_end;
+		}
+		backend->on_accept = on_accept;
+		backend->userdata = userdata;
+		hevent_set_userdata(backend->io, backend);
+		memset(&ssl_param, 0, sizeof(ssl_param));
+		ssl_param.crt_file = crt_file;
+		ssl_param.key_file = key_file;
+		ssl_param.endpoint = HSSL_SERVER;
+		if (hio_new_ssl_ctx(backend->io, &ssl_param) != 0) {
+			error_printf("hio_new_ssl_ctx failed.\n");
+			goto func_end;
+		}
+	} else {
+		backend->io = hloop_create_tcp_server(g_hv_loop, host, port, on_backend_accept);
+		if (backend->io == NULL) {
+			goto func_end;
+		}
+		backend->on_accept = on_accept;
+		backend->userdata = userdata; /* WEB_SERVER */
+		hevent_set_userdata(backend->io, backend);
+	}
+	ret = 0;
+func_end:
+	if (ret != 0) {
+		backend_destroy(backend);
+		backend = NULL;
+	}
+	return backend;
+}
+static int backend_set_callback(void *_backendio, void (* on_read)(void *_backendio, void *userdata, uint8_t *content, size_t size), void (* on_write)(void *_backendio, void *userdata, const uint8_t *content, size_t size), void (* on_close)(void *_backendio, void *userdata), void *userdata) {
+	int ret = -1;
+	BackendIo *backendio = NULL;
+
+	backendio = (BackendIo *)_backendio;
+	if (backendio == NULL) {
+		goto func_end;
+	}
+	backendio->on_read = on_read;
+	backendio->on_write = on_write;
+	backendio->on_close = on_close;
+	backendio->userdata = userdata; /* HTTP_FD  */
+func_end:
+	return ret;
+}
+static int backend_enable_read(void *_backendio) {
+	int ret = -1;
+	BackendIo *backendio = NULL;
+
+	backendio = (BackendIo *)_backendio;
+	if (backendio == NULL) {
+		goto func_end;
+	}
+	hio_read(backendio->io);
+	ret = 0;
+func_end:
+	return ret;
+}
+static int backend_write(void *_backendio, const uint8_t *content, size_t size) {
+	int ret = -1;
+	BackendIo *backendio = NULL;
+
+	backendio = (BackendIo *)_backendio;
+	if (backendio == NULL) {
+		goto func_end;
+	}
+	hio_write(backendio->io, content, size);
+	ret = 0;
+func_end:
+	return ret;
+}
+static int backend_close(void *_backendio) {
+	int ret = -1;
+	BackendIo *backendio = NULL;
+
+	backendio = (BackendIo *)_backendio;
+	if (backendio == NULL) {
+		goto func_end;
+	}
+	ret = 0;
+func_end:
+	return ret;
+}
+/* tcp/ssl backend end */
+
+static void hexdump(void *_buf, size_t size) {
 	unsigned char *buf = (unsigned char *)_buf;
 	size_t i = 0, offset = 0;
 	char tmp = '\0';
@@ -388,9 +449,9 @@ const char *htmlencode(const char * src) {
 			dst_space <<= 1;
 		}
 		if (dst == NULL) {
-			dst = (char *)MY_MALLOC(dst_space);
+			dst = (char *)malloc(dst_space);
 		} else {
-			dst = (char *)MY_REALLOC(dst, dst_space);
+			dst = (char *)realloc(dst, dst_space);
 		}
 		if (dst == NULL) {
 			emergency_printf("malloc/realloc failed!\n");
@@ -420,7 +481,7 @@ static int free_kvpair_shallow(HTTP_KVPAIR **p_head) {
 	HTTP_KVPAIR *p_cur = NULL, *p_next = NULL;
 	for (p_cur = *p_head; p_cur != NULL; p_cur = p_next) {
 		p_next = p_cur->next;
-		MY_FREE(p_cur);
+		free(p_cur);
 	}
 	*p_head = NULL;
 	return 0;
@@ -432,12 +493,12 @@ static int free_kvpair_deep(HTTP_KVPAIR **p_head) {
 	for (p_cur = *p_head; p_cur != NULL; p_cur = p_next) {
 		p_next = p_cur->next;
 		if (p_cur->key != NULL) {
-			MY_FREE(p_cur->key);
+			free(p_cur->key);
 		}
 		if (p_cur->value != NULL) {
-			MY_FREE(p_cur->value);
+			free(p_cur->value);
 		}
-		MY_FREE(p_cur);
+		free(p_cur);
 	}
 	*p_head = NULL;
 	return 0;
@@ -447,7 +508,7 @@ static int free_ranges(HTTP_RANGE **p_head) {
 	HTTP_RANGE *p_cur = NULL, *p_next = NULL;
 	for (p_cur = *p_head; p_cur != NULL; p_cur = p_next) {
 		p_next = p_cur->next;
-		MY_FREE(p_cur);
+		free(p_cur);
 	}
 	*p_head = NULL;
 	return 0;
@@ -457,7 +518,7 @@ static int free_files(HTTP_FILES **p_head) {
 	HTTP_FILES *p_cur = NULL, *p_next = NULL;
 	for (p_cur = *p_head; p_cur != NULL; p_cur = p_next) {
 		p_next = p_cur->next;
-		MY_FREE(p_cur);
+		free(p_cur);
 	}
 	*p_head = NULL;
 	return 0;
@@ -576,7 +637,7 @@ HTTP_FILES *web_file_list(HTTP_FD *p_link, const char *key) {
 		if (0 != strcmp(p_cur->key, key)) {
 			continue;
 		}
-		p_new = (HTTP_FILES *)MY_MALLOC(sizeof(HTTP_FILES));
+		p_new = (HTTP_FILES *)malloc(sizeof(HTTP_FILES));
 		if (p_new == NULL) {
 			emergency_printf("malloc failed!\n");
 			free_files(&p_head);
@@ -606,46 +667,38 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 	unsigned char *p_start = NULL, *p_end = NULL, *p_entityend = NULL;
 	int fsize = 0, boundary_split_len = 0, boundary_end_len = 0;
 	char *p_start_dis = NULL, *p_end_dis = NULL, *p_key_dis = NULL, *p_value_dis = NULL;
-	int ret = 0, isend = 0, i = 0, boundary_match = 0;
+	int ret = -1, isend = 0, i = 0, boundary_match = 0;
 	HTTP_KVPAIR *p_newdata = NULL, *p_taildata = NULL;
 	HTTP_FILES *p_newfile = NULL, *p_tailfile = NULL;
 
 	/* save boundary for later use */
-	p_boundary_start = (char *)MY_MALLOC(strlen(p_boundary) + 5);
+	p_boundary_start = (char *)malloc(strlen(p_boundary) + 5);
 	if (p_boundary_start == NULL) {
 		emergency_printf("malloc failed!\n");
-		*judge_result = JUDGE_ERROR;
 		*http_code = 500;
-		ret = -1;
-		goto exit_fn;
+		goto func_end;
 	}
 	sprintf(p_boundary_start, "--%s\r\n", p_boundary);
-	p_boundary_split = (char *)MY_MALLOC(strlen(p_boundary) + 7);
+	p_boundary_split = (char *)malloc(strlen(p_boundary) + 7);
 	if (p_boundary_split == NULL) {
 		emergency_printf("malloc failed!\n");
-		*judge_result = JUDGE_ERROR;
 		*http_code = 500;
-		ret = -1;
-		goto exit_fn;
+		goto func_end;
 	}
 	sprintf(p_boundary_split, "\r\n--%s\r\n", p_boundary);
 	boundary_split_len = strlen(p_boundary_split);
-	p_boundary_end = (char *)MY_MALLOC(strlen(p_boundary) + 9);
+	p_boundary_end = (char *)malloc(strlen(p_boundary) + 9);
 	if (p_boundary_end == NULL) {
 		emergency_printf("malloc failed!\n");
-		*judge_result = JUDGE_ERROR;
 		*http_code = 500;
-		ret = -1;
-		goto exit_fn;
+		goto func_end;
 	}
 	sprintf(p_boundary_end, "\r\n--%s--\r\n", p_boundary);
 	boundary_end_len = strlen(p_boundary_end);
 	if (0 != memcmp(p_entity, p_boundary_start, strlen(p_boundary_start))) {
 		notice_printf("'boundary_start' not found at begin of entity.\n");
-		*judge_result = JUDGE_ERROR;
 		*http_code = 400;
-		ret = -1;
-		goto exit_fn;
+		goto func_end;
 	}
 	p_start = p_entity + strlen(p_boundary_start);
 	while (1) { /* get part splited by boundary by this loop */
@@ -653,10 +706,8 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 			for (p_end = p_start; *p_end != '\0' && *p_end != ':'; p_end++);/* p_end point to ':' */
 			if (*p_end != ':') {
 				notice_printf("':' not found at end of header define key.\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 400;
-				ret = -1;
-				goto exit_fn;
+				goto func_end;
 			}
 			*p_end = '\0';
 			p_key = (char *)p_start;
@@ -666,10 +717,8 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 			for (p_end = p_start; *p_end != '\0' && *p_end != '\r' && *p_end != '\n'; p_end++);/* value exclue new line, p_end point to line end */
 			if (*p_end != '\r' || *(p_end + 1) != '\n') {
 				notice_printf("CRLF not found at end of multi header define value.\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 400;
-				ret = -1;
-				goto exit_fn;
+				goto func_end;
 			}
 			*p_end = '\0';
 			p_value = (char *)p_start;
@@ -680,10 +729,8 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 				for (p_end_dis = p_start_dis; *p_end_dis != '\0' && *p_end_dis != ';'; p_end_dis++);/* Disposition-type end with ':' */
 				if (*p_end_dis != ';') {
 					notice_printf("';' not found at end of Disposition-type.\n");
-					*judge_result = JUDGE_ERROR;
 					*http_code = 400;
-					ret = -1;
-					goto exit_fn;
+					goto func_end;
 				}
 				/* skip SPACE and TAB after ':' */
 				for(p_start_dis = p_end_dis + 1; *p_start_dis == ' ' || *p_start_dis == '\t'; p_start_dis++);
@@ -691,10 +738,8 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 					for (p_end_dis = p_start_dis; *p_end_dis != '\0' && *p_end_dis != '='; p_end_dis++);/* p_end_dis point to '=' */
 					if (*p_end_dis != '=' || *(p_end_dis + 1) != '\"') {
 						notice_printf("'=\"' not found at end of disposition key.\n");
-						*judge_result = JUDGE_ERROR;
 						*http_code = 400;
-						ret = -1;
-						goto exit_fn;
+						goto func_end;
 					}
 					*p_end_dis = '\0';
 
@@ -703,10 +748,8 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 					for (p_end_dis = p_start_dis; *p_end_dis != '\0' && *p_end_dis != '\"'; p_end_dis++);/* p_end_dis point to '\"' */
 					if (*p_end_dis != '\"') {
 						notice_printf("'\"' not found at end of disposition value.\n");
-						*judge_result = JUDGE_ERROR;
 						*http_code = 400;
-						ret = -1;
-						goto exit_fn;
+						goto func_end;
 					}
 					*p_end_dis = '\0';
 					p_value_dis = p_start_dis;
@@ -770,23 +813,19 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 					break;
 				} else {
 					notice_printf("'boundary_end' not found at end of entity.\n");
-					*judge_result = JUDGE_ERROR;
 					*http_code = 500;
-					ret = -1;
-					goto exit_fn;
+					goto func_end;
 				}
 			} else {
 				p_end++;
 			}
 		}
 		if (p_fname != NULL) { /* put file into p_link->file_data if is file */
-			p_newfile = (HTTP_FILES *)MY_MALLOC(sizeof(HTTP_FILES));
+			p_newfile = (HTTP_FILES *)malloc(sizeof(HTTP_FILES));
 			if (p_newfile == NULL) {
 				emergency_printf("malloc failed!\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 500;
-				ret = -1;
-				goto exit_fn;
+				goto func_end;
 			}
 			memset(p_newfile, 0x00, sizeof(HTTP_FILES));
 			p_newfile->key = p_fkey;
@@ -808,13 +847,11 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 			p_tailfile = p_newfile;
 			p_newfile = NULL;
 		} else { /* put data into p_link->post_data if is not file */
-			p_newdata = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
+			p_newdata = (HTTP_KVPAIR *)malloc(sizeof(HTTP_KVPAIR));
 			if (p_newdata == NULL) {
 				emergency_printf("malloc failed!\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 500;
-				ret = -1;
-				goto exit_fn;
+				goto func_end;
 			}
 			memset(p_newdata, 0x00, sizeof(HTTP_KVPAIR));
 			p_newdata->key = p_fkey;
@@ -831,7 +868,7 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 			p_taildata = p_newdata;
 			p_newdata = NULL;
 			if (p_ftype) {
-				MY_FREE(p_ftype);
+				free(p_ftype);
 				p_ftype = NULL;
 			}
 		}
@@ -841,15 +878,19 @@ static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_
 			break;
 		}
 	}
-exit_fn:
+	ret = 0;
+func_end:
+	if (ret != 0) {
+		*judge_result = JUDGE_ERROR;
+	}
 	if (p_boundary_start != NULL) {
-		MY_FREE(p_boundary_start);
+		free(p_boundary_start);
 	}
 	if (p_boundary_split != NULL) {
-		MY_FREE(p_boundary_split);
+		free(p_boundary_split);
 	}
 	if (p_boundary_end != NULL) {
-		MY_FREE(p_boundary_end);
+		free(p_boundary_end);
 	}
 	return ret;
 }
@@ -862,15 +903,14 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 	unsigned long u_entitylen = 0;
 	HTTP_KVPAIR *p_new = NULL, *p_tail = NULL;
 	HTTP_RANGE *p_range_new = NULL, *p_range_tail = NULL;
-	int is_multipart = 0, is_over = 0;
+	int ret = -1, is_multipart = 0, is_over = 0;
 
 	p_start = (char *)p_link->recvbuf;
 	for (p_end = p_start; *p_end != ' ' && *p_end != '\0'; p_end++);/* p_end point to the end of method */
 	if (*p_end != ' ') {
 		notice_printf("SP not found at end of method.\n");
-		*judge_result = JUDGE_ERROR;
 		*http_code = 400;
-		return -1;
+		goto func_end;
 	}
 	*p_end = '\0';
 	p_link->method = p_start; /* get method */
@@ -879,9 +919,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 	for (p_end = p_start; *p_end != ' ' && *p_end != '\0'; p_end++);/* p_end point to the end of url */
 	if (*p_end != ' ') {
 		notice_printf("SP not found at end of url.\n");
-		*judge_result = JUDGE_ERROR;
 		*http_code = 400;
-		return -1;
+		goto func_end;
 	}
 	*p_end = '\0';
 	p_req_url = p_start; /* get req_url */
@@ -890,9 +929,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 	for (p_end = p_start; *p_end != '\r' && *p_end != '\n' && *p_end != '\0'; p_end++);/* p_end point to the end of http version */
 	if (*p_end != '\r' || *(p_end + 1) != '\n') {
 		notice_printf("CRLF not found at end of version.\n");
-		*judge_result = JUDGE_ERROR;
 		*http_code = 400;
-		return -1;
+		goto func_end;
 	}
 	*p_end = '\0';
 	p_link->http_version = p_start; /* get http_version */
@@ -905,9 +943,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			for (p_end = p_start; *p_end != ':' && *p_end != '\0'; p_end++);/* p_end point to the end of key */
 			if (*p_end != ':') {
 				notice_printf("':' not found at end of header define key.\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 400;
-				return -1;
+				goto func_end;
 			}
 			*p_end = '\0';
 			p_key = p_start;
@@ -917,20 +954,18 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			for (p_end = p_start; *p_end != '\r' && *p_end != '\n' && *p_end != '\0'; p_end++);/* p_end point to ehd end of value */
 			if (*p_end != '\r' || *(p_end + 1) != '\n') {
 				notice_printf("CRLF not found at end of header define value.\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 400;
-				return -1;
+				goto func_end;
 			}
 			*p_end = '\0';
 			p_value = p_start;
 
 			/* add pair to p_link->header_data */
-			p_new = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
+			p_new = (HTTP_KVPAIR *)malloc(sizeof(HTTP_KVPAIR));
 			if (p_new == NULL) {
 				emergency_printf("malloc failed!\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 500;
-				return -1;
+				goto func_end;
 			}
 			memset(p_new, 0x00, sizeof(HTTP_KVPAIR));
 			debug_printf("hfield: '%s' => '%s'\n", p_key, p_value);
@@ -985,12 +1020,11 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			p_value = p_start;
 
 			/* add pair to p_link->query_data */
-			p_new = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
+			p_new = (HTTP_KVPAIR *)malloc(sizeof(HTTP_KVPAIR));
 			if (p_new == NULL) {
 				emergency_printf("malloc failed!\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 500;
-				return -1;
+				goto func_end;
 			}
 			memset(p_new, 0x00, sizeof(HTTP_KVPAIR));
 			debug_printf("query: '%s' => '%s'\n", p_key, p_value);
@@ -1022,9 +1056,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			for (p_end = p_start; *p_end != '\0' && *p_end != '='; p_end++);/* p_end point to '=' */
 			if (*p_end != '=') {
 				notice_printf("'=' not found at end of cookie key.\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 400;
-				return -1;
+				goto func_end;
 			}
 			*p_end = '\0';
 			p_key = p_start;
@@ -1038,12 +1071,11 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			p_value = p_start;
 
 			/* add pair to p_link->cookie_data */
-			p_new = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
+			p_new = (HTTP_KVPAIR *)malloc(sizeof(HTTP_KVPAIR));
 			if (p_new == NULL) {
 				emergency_printf("malloc failed!\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 500;
-				return -1;
+				goto func_end;
 			}
 			memset(p_new, 0x00, sizeof(HTTP_KVPAIR));
 			debug_printf("cookie: '%s' => '%s'\n", p_key, p_value);
@@ -1076,9 +1108,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 		/* strlen("bytes=") == 6 */
 		if (strncmp("bytes=", p_range, 6) != 0) {
 			notice_printf("'bytes=' not found at start of range.\n");
-			*judge_result = JUDGE_ERROR;
 			*http_code = 416;
-			return -1;
+			goto func_end;
 		}
 		is_over = 0;
 		p_start = p_range + 6;
@@ -1086,9 +1117,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			for (p_end = p_start; isdigit(*p_end); p_end++); /* p_end point to '-''' */
 			if (*p_end != '-') {
 				notice_printf("'-' not found at range.\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 416;
-				return -1;
+				goto func_end;
 			}
 			*p_end = '\0';
 			p_range_start = p_start;
@@ -1097,9 +1127,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			for (p_end = p_start; isdigit(*p_end); p_end++); /* p_end point to ',' or '\0' */
 			if (*p_end != ',' && *p_end != '\0') {
 				notice_printf("',' or '\\0' not found at end of a range.\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 416;
-				return -1;
+				goto func_end;
 			}
 			if (*p_end == '\0') {
 				is_over = 1;
@@ -1108,12 +1137,11 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			p_range_end = p_start;
 
 			/* save result to chained list p_link->range_data */
-			p_range_new = (HTTP_RANGE *)MY_MALLOC(sizeof(HTTP_RANGE));
+			p_range_new = (HTTP_RANGE *)malloc(sizeof(HTTP_RANGE));
 			if (p_range_new == NULL) {
 				emergency_printf("malloc failed!\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 500;
-				return -1;
+				goto func_end;
 			}
 			memset(p_range_new, 0x00, sizeof(HTTP_RANGE));
 			debug_printf("range: '%s' to '%s'\n", p_range_start, p_range_end);
@@ -1128,10 +1156,9 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 				p_range_new->end = RANGE_NOTSET;
 			}
 			if (p_range_new->start == RANGE_NOTSET && p_range_new->end == RANGE_NOTSET) {
-				MY_FREE(p_range_new);
-				*judge_result = JUDGE_ERROR;
+				free(p_range_new);
 				*http_code = 416;
-				return -1;
+				goto func_end;
 			}
 			if (p_range_tail == NULL) {
 				p_link->range_data = p_range_new;
@@ -1154,9 +1181,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 	if (p_entity[0] != '\0') {
 		if (0 == p_link->content_len) {
 			notice_printf("no content.\n");
-			*judge_result = JUDGE_ERROR;
 			*http_code = 411;
-			return -1;
+			goto func_end;
 		}
 		debug_printf("ready for parse entity\n");
 		p_contype = (char *)web_header_str(p_link, "Content-Type", "");
@@ -1165,9 +1191,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			p_boundary = p_contype + 30;
 			if (*p_boundary == '\0') {
 				notice_printf("boundary is empty.\n");
-				*judge_result = JUDGE_ERROR;
 				*http_code = 400;
-				return -1;
+				goto func_end;
 			}
 			is_multipart = 1;
 		}
@@ -1182,9 +1207,8 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 				for (p_end = p_start; *p_end != '\0' && *p_end != '='; p_end++);/* p_end point to '=' */
 				if (*p_end != '=') {
 					notice_printf("'=' not found at end of post key.\n");
-					*judge_result = JUDGE_ERROR;
 					*http_code = 400;
-					return -1;
+					goto func_end;
 				}
 				*p_end = '\0';
 				p_key = p_start;
@@ -1199,12 +1223,11 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 				p_value = p_start;
 
 				/* save information to p_link->post_data */
-				p_new = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
+				p_new = (HTTP_KVPAIR *)malloc(sizeof(HTTP_KVPAIR));
 				if (p_new == NULL) {
 					emergency_printf("malloc failed!\n");
-					*judge_result = JUDGE_ERROR;
 					*http_code = 500;
-					return -1;
+					goto func_end;
 				}
 				memset(p_new, 0x00, sizeof(HTTP_KVPAIR));
 				debug_printf("post: '%s' => '%s'\n", p_key, p_value);
@@ -1226,14 +1249,19 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 			}
 		}
 	}
-	return 0;
+	ret = 0;
+func_end:
+	if (ret != 0) {
+		*judge_result = JUDGE_ERROR;
+	}
+	return ret;
 }
 
 /* judge http request is complete or not, call parse_http to get information if is complete */
 static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code) {
 	char p_key[16], p_value[16], *p_headend = NULL;
 	const char *p_start = NULL, *p_end = NULL;
-	int is_complete = 0;
+	int ret = -1, is_complete = 0;
 	unsigned int cur_entity_len = 0, head_len = 0;
 
 	*http_code = 0;
@@ -1241,11 +1269,10 @@ static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code
 	if (p_headend == NULL) {
 		if (g_max_head_len && p_link->recvbuf_len > g_max_head_len) {
 			*http_code = 414;
-			*judge_result = JUDGE_ERROR;
 		} else {
-			*judge_result = JUDGE_CONTINUE;
+			ret = -2; /* *judge_result = JUDGE_CONTINUE */
 		}
-		goto exit_fn;
+		goto func_end;
 	}
 	head_len = p_headend - (char *)(p_link->recvbuf);
 	if (strncmp((char *)(p_link->recvbuf), "GET ", 4) && p_link->content_len == 0) {
@@ -1258,8 +1285,7 @@ static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code
 				for (p_end = p_start; *p_end != ':' && *p_end != '\0'; p_end++);/* find ':' */
 				if (*p_end == '\0') {
 					*http_code = 400;
-					*judge_result = JUDGE_ERROR;
-					goto exit_fn;
+					goto func_end;
 				}
 				if (p_end - p_start == 14) { // strlen("Content-Length") is 14
 					memcpy(p_key, p_start, 14);
@@ -1269,8 +1295,7 @@ static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code
 						for (p_end = p_start; *p_end != '\r' && *p_end != '\0'; p_end++);/* find line end */
 						if (p_end - p_start > 10) {
 							*http_code = 413;
-							*judge_result = JUDGE_ERROR;
-							goto exit_fn;
+							goto func_end;
 						}
 						memcpy(p_value, p_start, p_end - p_start);
 						*(p_value + (p_end - p_start)) = '\0';
@@ -1278,18 +1303,16 @@ static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code
 						/* exit if Content-Length is founded */
 						if (g_max_entity_len && p_link->content_len > g_max_entity_len) {
 							*http_code = 413;
-							*judge_result = JUDGE_ERROR;
-							goto exit_fn;
+							goto func_end;
 						}
 						/* get Content-Length, the size of request is clear, realloc enough space to avoid realloc again */
 						if (p_link->recvbuf_space < p_link->content_len + (head_len + 4) + 1) {
 							p_link->recvbuf_space = p_link->content_len + (head_len + 4) + 1;
-							p_link->recvbuf = (unsigned char *)MY_REALLOC(p_link->recvbuf, p_link->recvbuf_space);
+							p_link->recvbuf = (unsigned char *)realloc(p_link->recvbuf, p_link->recvbuf_space);
 							if (p_link->recvbuf == NULL) {
 								emergency_printf("realloc failed!\n");
 								*http_code = 500;
-								*judge_result = JUDGE_ERROR;
-								goto exit_fn;
+								goto func_end;
 							}
 						}
 						break;
@@ -1305,73 +1328,72 @@ static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code
 						p_start = p_end + 2;
 					} else {
 						*http_code = 400;
-						*judge_result = JUDGE_ERROR;
-						goto exit_fn;
+						goto func_end;
 					}
 				}
 			}
 		}
 	}
 	if (p_link->content_len == 0) {
-		*judge_result = JUDGE_COMPLETE;
-		is_complete = 1;
-		goto exit_fn;
+		ret = 0; /* *judge_result = JUDGE_COMPLETE; */
+		goto func_end;
 	}
 	cur_entity_len = p_link->recvbuf_len - (head_len + 4);
 	p_link->need_len = p_link->content_len - cur_entity_len;
 	if (p_link->need_len > 0) {
-		*judge_result = JUDGE_CONTINUE;
-		goto exit_fn;
+		ret = -2;
+		goto func_end;
 	} else if (p_link->need_len == 0) {
-		*judge_result = JUDGE_COMPLETE;
-		is_complete = 1;
-		goto exit_fn;
+		ret = 0;
+		goto func_end;
 	} else {
 		*http_code = 400;
-		*judge_result = JUDGE_ERROR;
-		goto exit_fn;
+		goto func_end;
 	}
-exit_fn:
+func_end:
 	if (head_len) {
 		*(p_link->recvbuf + head_len) = '\r';
 	}
-	if (is_complete) { /* start parse if request is complete */
+	if (ret == 0) { /* start parse if request is complete */
+		*judge_result = JUDGE_COMPLETE;
 		p_link->state = STATE_RESPONSING;
 		debug_printf("before parse_http\n");
 		parse_http(p_link, judge_result, http_code);
 		debug_printf("after parse_http\n");
+	} else if (ret == -2) {
+		*judge_result = JUDGE_CONTINUE;
+	} else {
+		*judge_result = JUDGE_ERROR;
 	}
-	return 0;
+	return ret;
 }
 
 /* configure http header of response */
 int web_set_header(HTTP_FD *p_link, const char *name, const char *value) {
+	int ret = -1;
 	HTTP_KVPAIR *p_new = NULL, *p_tail = NULL;
 
 	if (!name || name[0] == '\0') {
-		return -1;
+		goto func_end;
 	}
 	/* save information to p_link->cnf_header */
-	p_new = (HTTP_KVPAIR *)MY_MALLOC(sizeof(HTTP_KVPAIR));
+	p_new = (HTTP_KVPAIR *)malloc(sizeof(HTTP_KVPAIR));
 	if (p_new == NULL) {
 		emergency_printf("malloc failed!\n");
-		return -1;
+		goto func_end;
 	}
 	memset(p_new, 0x00, sizeof(HTTP_KVPAIR));
-	p_new->key = (char *)MY_MALLOC(strlen(name) + 1);
+	p_new->key = (char *)malloc(strlen(name) + 1);
 	if (p_new->key == NULL) {
 		emergency_printf("malloc failed!\n");
-		MY_FREE(p_new);
-		return -1;
+		goto func_end;
 	}
 	strcpy(p_new->key, name);
 	if (value && value[0] != '\0') {
-		p_new->value = (char *)MY_MALLOC(strlen(value) + 1);
+		p_new->value = (char *)malloc(strlen(value) + 1);
 		if (p_new->value == NULL) {
 			emergency_printf("malloc failed!\n");
-			MY_FREE(p_new->key);
-			MY_FREE(p_new);
-			return -1;
+			goto func_end;
 		}
 		strcpy(p_new->value, value);
 	}
@@ -1381,17 +1403,30 @@ int web_set_header(HTTP_FD *p_link, const char *name, const char *value) {
 		for (p_tail = p_link->cnf_header; p_tail->next != NULL; p_tail = p_tail->next);
 		p_tail->next = p_new;
 	}
-	return 0;
+	ret = 0;
+func_end:
+	if (ret != 0) {
+		if (p_new != NULL) {
+			if (p_new->key != NULL) {
+				free(p_new->key);
+			}
+			if (p_new->value != NULL) {
+				free(p_new->value);
+			}
+			free(p_new);
+		}
+	}
+	return ret;
 }
 
 /* cancel the configuration of http header */
 int web_unset_header(HTTP_FD *p_link, const char *name) {
+	int ret = -1, is_same = 1;
 	HTTP_KVPAIR *p_pre = NULL, *p_cur = NULL, *p_next = NULL;
 	const char *p_keypos = NULL, *p_inkeypos = NULL;
-	int is_same = 1;
 
 	if (!name || name[0] == '\0') {
-		return -1;
+		goto func_end;
 	}
 	p_pre = NULL;
 	for (p_cur = p_link->cnf_header; p_cur != NULL; p_cur = p_next) {
@@ -1417,16 +1452,18 @@ int web_unset_header(HTTP_FD *p_link, const char *name) {
 			} else {
 				p_pre->next = p_next;
 			}
-			MY_FREE(p_cur->key);
+			free(p_cur->key);
 			if (p_cur->value) {
-				MY_FREE(p_cur->value);
+				free(p_cur->value);
 			}
-			MY_FREE(p_cur);
+			free(p_cur);
 		} else {
 			p_pre = p_cur;
 		}
 	}
-	return 0;
+	ret = 0;
+func_end:
+	return ret;
 }
 
 int web_vprintf(HTTP_FD *p_link, const char *format, va_list args) {
@@ -1506,8 +1543,8 @@ const char *get_mime_type(const char *p_path) {
 	return "application/octet-stream";
 }
 int web_fin(HTTP_FD *p_link, int http_code) {
+	int ret = -1, i = 0;
 	HTTP_KVPAIR *p_cur = NULL;
-	int i = 0;
 	const char *status_text = "(unknown)", *p_value = NULL;
 	static HTTP_CODE_MAP code_map[] = {
 			{100, "Continue", NULL},
@@ -1586,7 +1623,7 @@ int web_fin(HTTP_FD *p_link, int http_code) {
 		} else {
 			printf("duplicate call \"web_fin\" @ \"%s\"!\n", p_link->path);
 		}
-		return -1;
+		goto func_end;
 	}
 	if (http_code == 500) {
 		tt_buffer_no_copy(&(p_link->response_head), (unsigned char *)g_err_500_head, strlen(g_err_500_head), 0, 0);
@@ -1612,7 +1649,7 @@ int web_fin(HTTP_FD *p_link, int http_code) {
 				continue;
 			} else if (p_value[0] == '\0') { /* "" means not modified by user */
 				if (0 == strcasecmp(hfields[i][0], "Content-Length")) {
-					tt_buffer_printf(&(p_link->response_head), "Content-Length: %" SIZET_FMT "\r\n", p_link->response_entity.used);
+					tt_buffer_printf(&(p_link->response_head), "Content-Length: %" PRId64 "\r\n", p_link->response_entity.used);
 				} else if (0 == strcasecmp(hfields[i][0], "Content-Type")) {
 					if (p_link->path == NULL || (http_code != 200 &&  http_code != 206)) {
 						tt_buffer_printf(&(p_link->response_head), "Content-Type: text/html\r\n");
@@ -1650,7 +1687,9 @@ int web_fin(HTTP_FD *p_link, int http_code) {
 		p_link->state = STATE_SENDING;
 	}
 	p_link->send_state = SENDING_HEAD;
-	return 0;
+	ret = 0;
+func_end:
+	return ret;
 }
 
 /* response server is busy */
@@ -1661,237 +1700,6 @@ int web_busy_response(HTTP_FD *p_link) {
 	web_fin(p_link, 503);
 	return 0;
 }
-#ifdef WITH_SSL
-/* load certificate from memory */
-static X509 *load_certificate_mem(const char *cert_b64) {
-	BIO *bio_in = NULL;
-	X509 *x509 = NULL;
-	bio_in = BIO_new_mem_buf(cert_b64, strlen(cert_b64));
-	if (bio_in == NULL) {
-		emergency_printf("create bio failed.\n");
-		return NULL;
-	}
-	x509 = PEM_read_bio_X509(bio_in, NULL, NULL, NULL);
-	BIO_free(bio_in);
-	bio_in = NULL;
-	return x509;
-}
-
-/* define the callback of get password, or will use default callback PEM_def_callback and will block at "Enter PEM pass phrase:" */
-static int my_pem_password_cb(char *buf, int num, int w, void *key) {
-	if (key == NULL) {
-		return -1;
-	} else {
-		return PEM_def_callback(buf, num, w, key);
-	}
-}
-
-/* load private key that base64 encoded */
-static EVP_PKEY *load_privatekey_mem(const char *key_b64, const char *password) {
-	BIO *bio_in = NULL;
-	EVP_PKEY *pkey = NULL;
-	bio_in = BIO_new_mem_buf(key_b64, strlen(key_b64));
-	if (bio_in == NULL) {
-		emergency_printf("create bio failed.\n");
-		return NULL;
-	}
-	pkey = PEM_read_bio_PrivateKey(bio_in, NULL, my_pem_password_cb, (void *)password);
-	BIO_free(bio_in);
-	bio_in = NULL;
-	return pkey;
-}
-
-/* get issuer name of certificate */
-static const char *get_x509_issuer_name(X509 *x509, const char *key){
-	X509_NAME_ENTRY *ent = NULL;
-	const ASN1_STRING *val = NULL;
-	BIO *bio_out = NULL;
-	X509_NAME *name = NULL;
-	static char buf[256];
-	int i = 0, cnt = 0;
-
-	bio_out = BIO_new(BIO_s_mem());
-	if (bio_out == NULL) {
-		return "";
-	}
-	name = X509_get_issuer_name(x509);
-	if (key && key[0]) {
-		cnt = X509_NAME_entry_count(name);
-		for (i = 0; i < cnt; i++) {
-			ent = X509_NAME_get_entry(name, i);
-			if (0 == strcmp(key, OBJ_nid2sn(OBJ_obj2nid(X509_NAME_ENTRY_get_object(ent))))) {
-				val = X509_NAME_ENTRY_get_data(ent);
-				BIO_write(bio_out, val->data, val->length);
-				break;
-			}
-		}
-	} else {
-		X509_NAME_print_ex(bio_out, name, 0, XN_FLAG_SEP_SPLUS_SPC);
-	}
-	memset(buf, 0x00, sizeof(buf));
-	BIO_read(bio_out, buf, sizeof(buf) - 1);
-	BIO_free(bio_out);
-	return (const char *)buf;
-}
-
-/* get subject name of certificate */
-static const char *get_x509_subject_name(X509 *x509, const char *key){
-	X509_NAME_ENTRY *ent = NULL;
-	const ASN1_STRING *val = NULL;
-	BIO *bio_out = NULL;
-	X509_NAME *name = NULL;
-	static char buf[256];
-	int i = 0, cnt = 0;
-
-	bio_out = BIO_new(BIO_s_mem());
-	if (bio_out == NULL) {
-		return "";
-	}
-	name = X509_get_subject_name(x509);
-	if (key && key[0]) {
-		cnt = X509_NAME_entry_count(name);
-		for (i = 0; i < cnt; i++) {
-			ent = X509_NAME_get_entry(name, i);
-			if (0 == strcmp(key, OBJ_nid2sn(OBJ_obj2nid(X509_NAME_ENTRY_get_object(ent))))) {
-				val = X509_NAME_ENTRY_get_data(ent);
-				BIO_write(bio_out, val->data, val->length);
-				break;
-			}
-		}
-	} else {
-		X509_NAME_print_ex(bio_out, name, 0, XN_FLAG_SEP_SPLUS_SPC);
-	}
-	memset(buf, 0x00, sizeof(buf));
-	BIO_read(bio_out, buf, sizeof(buf) - 1);
-	BIO_free(bio_out);
-	return (const char *)buf;
-}
-
-/* get the time of start of certificate */
-static const char *get_x509_notBefore(X509 *x509){
-	static char buf[256];
-	BIO *bio_out = BIO_new(BIO_s_mem());
-	if (bio_out == NULL) {
-		return "";
-	}
-	ASN1_TIME_print(bio_out, X509_get_notBefore(x509));
-	memset(buf, 0x00, sizeof(buf));
-	BIO_read(bio_out, buf, sizeof(buf) - 1);
-	BIO_free(bio_out);
-	return (const char *)buf;
-}
-
-/* get the time of end of certificate */
-static const char *get_x509_notAfter(X509 *x509){
-	static char buf[256];
-	BIO *bio_out = BIO_new(BIO_s_mem());
-	if (bio_out == NULL) {
-		return "";
-	}
-	ASN1_TIME_print(bio_out, X509_get_notAfter(x509));
-	memset(buf, 0x00, sizeof(buf));
-	BIO_read(bio_out, buf, sizeof(buf) - 1);
-	BIO_free(bio_out);
-	return (const char *)buf;
-}
-
-static void cert_info_print(X509 *x509){
-	const char *name = NULL;
-	if (x509 == NULL) {
-		return;
-	}
-	printf("version: V%ld\n", X509_get_version(x509) + 1);
-	if ((name = get_x509_issuer_name(x509, "CN"))[0]) {
-		printf("issuer: %s\n", name);
-	} else if ((name = get_x509_issuer_name(x509, "OU"))[0]) {
-		printf("issuer: %s\n", name);
-	} else {
-		printf("issuer: %s\n", get_x509_issuer_name(x509, "O"));
-	}
-	if ((name = get_x509_subject_name(x509, "CN"))[0]) {
-		printf("subject: %s\n", name);
-	} else if ((name = get_x509_subject_name(x509, "OU"))[0]) {
-		printf("subject: %s\n", name);
-	} else {
-		printf("subject: %s\n", get_x509_subject_name(x509, "O"));
-	}
-	printf("time: %s ~ %s\n", get_x509_notBefore(x509), get_x509_notAfter(x509));
-}
-
-static int SSL_CTX_use_certificate_mem(SSL_CTX *ssl_ctx, const char *pem_cert) {
-	int ret = 1;
-	X509 *x509 = NULL;
-	x509 = load_certificate_mem(pem_cert);
-	if (x509 == NULL) {
-		emergency_printf("read x509 failed.\n");
-		return -1;
-	}
-	cert_info_print(x509);
-	if (SSL_CTX_use_certificate(ssl_ctx, x509) <= 0) {
-		emergency_printf("import certificate failed.\n");
-		ret = -1;
-	}
-	X509_free(x509);
-	return ret;
-}
-
-static int SSL_CTX_use_PrivateKey_mem(SSL_CTX *ssl_ctx, const char *privkey, const char *password) {
-	int ret = 1;
-	EVP_PKEY *pkey = NULL;
-	pkey = load_privatekey_mem(privkey, password);
-	if (pkey == NULL) {
-		emergency_printf("read privatekey failed.\n");
-		return -1;
-	}
-	if (SSL_CTX_use_PrivateKey(ssl_ctx, pkey) <= 0) {
-		emergency_printf("import privkey failed.\n");
-		ret = -1;
-	}
-	EVP_PKEY_free(pkey);
-	return ret;
-}
-
-/* create SSL context, return NULL if failed */
-SSL_CTX *create_ssl_ctx(const char *svr_cert, const char *privkey, const char *password) {
-	SSL_CTX *ssl_ctx = NULL;
-	int ret = 0;
-
-	if (privkey == NULL) {
-		privkey = svr_cert;
-	}
-	ssl_ctx = SSL_CTX_new(SSLv23_server_method());
-	if (ssl_ctx == NULL) {
-		emergency_printf("create ssl_ctx failed.\n");
-		ret = -1;
-		goto exit_fn;
-	}
-	if (SSL_CTX_use_certificate_mem(ssl_ctx, svr_cert) <= 0) {
-		emergency_printf("import certificate failed.\n");
-		ret = -1;
-		goto exit_fn;
-	}
-
-	if (SSL_CTX_use_PrivateKey_mem(ssl_ctx, privkey, password) <= 0) {
-		emergency_printf("import privkey failed.\n");
-		ret = -1;
-		goto exit_fn;
-	}
-
-	if (!SSL_CTX_check_private_key(ssl_ctx)) {
-		emergency_printf("privkey is invalid.\n");
-		ret = -1;
-		goto exit_fn;
-	}
-exit_fn:
-	if (ret != 0) {
-		if (ssl_ctx != NULL) {
-			SSL_CTX_free(ssl_ctx);
-			ssl_ctx = NULL;
-		}
-	}
-	return ssl_ctx;
-}
-#endif /* endof WITH_SSL */
 static int reset_link_for_continue(HTTP_FD *p_link) {
 	p_link->recvbuf_len = 0;
 	p_link->content_len = 0;
@@ -1927,25 +1735,25 @@ static int reset_link_for_continue(HTTP_FD *p_link) {
 	p_link->response_entity.used = 0;
 	if (p_link->recvbuf_space >= 8192) { /* free it if space > 8K, call malloc again if necessary */
 		if (p_link->recvbuf) {
-			MY_FREE(p_link->recvbuf);
+			free(p_link->recvbuf);
 			p_link->recvbuf = NULL;
 		}
 		p_link->recvbuf_space = 0;
+	}
+	if (p_link->userdata != NULL) {
+		if (p_link->free_userdata != NULL) {
+			p_link->free_userdata(p_link->userdata); /* TODO free */
+			p_link->free_userdata = NULL;
+		}
+		p_link->userdata = NULL;
 	}
 	return 0;
 }
 
 static int free_link_all(HTTP_FD *p_link) {
 	reset_link_for_continue(p_link);
-#ifdef WITH_SSL
-	if (p_link->ssl) {
-		/* libevent will free ssl */
-		// SSL_free(p_link->ssl);
-		p_link->ssl = NULL;
-	}
-#endif
 	if (p_link->recvbuf) {
-		MY_FREE(p_link->recvbuf);
+		free(p_link->recvbuf);
 		p_link->recvbuf = NULL;
 	}
 	p_link->recvbuf_space = 0;
@@ -1957,16 +1765,18 @@ static int free_link_all(HTTP_FD *p_link) {
 	tt_buffer_free(&(p_link->ws_data));
 	tt_buffer_free(&(p_link->ws_response));
 #endif
-	if (p_link->bev != NULL) {
-		bufferevent_free(p_link->bev);
-		p_link->bev = NULL;
-	}
-	MY_FREE(p_link);
+printf("tqwdbg, free link %p\n", p_link);
+	free(p_link);
 	return 0;
 }
 
 static void apply_change(HTTP_FD *p_link) {
+	// printf("tqwdbg, enter %s\n", __func__);
 	if (p_link->state == STATE_CLOSED) {
+		if (p_link->backendio != NULL) {
+			backend_set_callback(p_link->backendio, NULL, NULL, NULL, NULL);
+			backend_destroy(p_link->backendio);
+		}
 		if (g_http_links == p_link) {
 			g_http_links = p_link->next;
 		}
@@ -1978,111 +1788,82 @@ static void apply_change(HTTP_FD *p_link) {
 		}
 		free_link_all(p_link);
 		p_link = NULL;
-		return;
+		goto func_end;
 	}
 	if (p_link->state == STATE_RECVING) {
-		bufferevent_enable(p_link->bev, EV_READ);
-		bufferevent_disable(p_link->bev, EV_WRITE);
+		backend_enable_read(p_link->backendio);
 	} else if (p_link->state == STATE_SENDING || p_link->state == STATE_CLOSING) {
-		bufferevent_disable(p_link->bev, EV_READ);
 		if (p_link->sending_len == 0) {
 			if (p_link->send_state == SENDING_HEAD) {
-				bufferevent_write(p_link->bev, p_link->response_head.content, p_link->response_head.used);
 				p_link->sending_len = p_link->response_head.used;
+				backend_write(p_link->backendio, p_link->response_head.content, p_link->response_head.used);
 			} else {
-				bufferevent_write(p_link->bev, p_link->response_entity.content, p_link->response_entity.used);
 				p_link->sending_len = p_link->response_entity.used;
+				backend_write(p_link->backendio, p_link->response_entity.content, p_link->response_entity.used);
 			}
-			bufferevent_enable(p_link->bev, EV_WRITE);
 		} else {
-			bufferevent_disable(p_link->bev, EV_WRITE);
 		}
 #ifdef WITH_WEBSOCKET
 	} else if (p_link->state == STATE_WS_HANDSHAKE) {
-		bufferevent_disable(p_link->bev, EV_READ);
 		if (p_link->sending_len == 0) {
 			if (p_link->send_state == SENDING_HEAD) {
-				bufferevent_write(p_link->bev, p_link->response_head.content, p_link->response_head.used);
 				p_link->sending_len = p_link->response_head.used;
+				backend_write(p_link->backendio, p_link->response_head.content, p_link->response_head.used);
 			} else {
-				bufferevent_write(p_link->bev, p_link->response_entity.content, p_link->response_entity.used);
 				p_link->sending_len = p_link->response_entity.used;
+				backend_write(p_link->backendio, p_link->response_entity.content, p_link->response_entity.used);
 			}
-			bufferevent_enable(p_link->bev, EV_WRITE);
 		}
 	} else if (p_link->state == STATE_WS_CONNECTED) {
-		bufferevent_enable(p_link->bev, EV_READ);
 		if (p_link->ws_sendq.used > 0) {
-			if (!p_link->sending_len) {
-				bufferevent_write(p_link->bev, p_link->ws_sendq.content, p_link->ws_sendq.used);
+			if (p_link->sending_len == 0) {
 				p_link->sending_len = p_link->ws_sendq.used;
-				bufferevent_enable(p_link->bev, EV_WRITE);
+				backend_write(p_link->backendio, p_link->ws_sendq.content, p_link->ws_sendq.used);
 			} else {
 			}
 		} else {
-			bufferevent_disable(p_link->bev, EV_WRITE);
 		}
 #endif
 	} else {
 		emergency_printf("unexpected state %d!\n", p_link->state);
 	}
+func_end:
+	// printf("tqwdbg, leave %s\n", __func__);
+	return;
 }
-static void event_cb_web(struct bufferevent *bev, short event, void *user_data) {
-	HTTP_FD *p_link = (HTTP_FD *)user_data;
-
-	if (event & BEV_EVENT_EOF) {
-		debug_printf("Connection closed.\n");
-		p_link->state = STATE_CLOSED;
-	} else if (event & BEV_EVENT_ERROR) {
-		debug_printf("Connectiont Error: %s\n", strerror(errno));
-		p_link->state = STATE_CLOSED;
-	} else if (event & BEV_EVENT_CONNECTED) {
-		debug_printf("Connected.\n");
-	} else {
-		error_printf("no handler for event %04x\n", event);
-	}
-	apply_change(p_link);
-}
-static void http_read(HTTP_FD *p_link) {
+static void http_read(HTTP_FD *p_link, const uint8_t *content, size_t size) {
 	struct evbuffer *input = NULL;
-	size_t recv_len = 0;
 	int http_code = 500;	
 	E_HTTP_JUDGE judge_result = JUDGE_ERROR;
 	time_t tm_now;
-
-	input = bufferevent_get_input(p_link->bev);
-	if (input == NULL) {
-		return;
-	}
-	recv_len = evbuffer_get_length(input);
 
 	tm_now = time(0);
 	p_link->tm_last_active = tm_now;
 	if (p_link->recvbuf == NULL) {
 		p_link->recvbuf_space = g_init_recv_space;
-		p_link->recvbuf = (unsigned char *)MY_MALLOC(p_link->recvbuf_space);
+		p_link->recvbuf = (unsigned char *)malloc(p_link->recvbuf_space);
 		if (p_link->recvbuf == NULL) {
 			emergency_printf("malloc failed!\n");
 			web_fin(p_link, 500);
 			return;
 		}
 	}
-	if (p_link->recvbuf_len + recv_len >= p_link->recvbuf_space) {
-		while (p_link->recvbuf_len + recv_len >= p_link->recvbuf_space) {
+	if (p_link->recvbuf_len + size >= p_link->recvbuf_space) {
+		while (p_link->recvbuf_len + size >= p_link->recvbuf_space) {
 			p_link->recvbuf_space <<= 1;
 		}
-		p_link->recvbuf = (unsigned char *)MY_REALLOC(p_link->recvbuf, p_link->recvbuf_space);
+		p_link->recvbuf = (unsigned char *)realloc(p_link->recvbuf, p_link->recvbuf_space);
 		if (p_link->recvbuf == NULL) {
 			emergency_printf("realloc failed!\n");
 			web_fin(p_link, 500);
 			return;
 		}
 	}
-	bufferevent_read(p_link->bev, p_link->recvbuf + p_link->recvbuf_len, recv_len);
-	p_link->recvbuf_len += recv_len;
+	memcpy(p_link->recvbuf + p_link->recvbuf_len, content, size);
+	p_link->recvbuf_len += size;
 	*(p_link->recvbuf + p_link->recvbuf_len) = '\0';
 	if (p_link->content_len) {
-		p_link->need_len -= recv_len;
+		p_link->need_len -= size;
 	}
 	// printf("--------------------------------\n");
 	// hexdump(p_link->recvbuf, p_link->recvbuf_len);
@@ -2098,7 +1879,7 @@ static void http_read(HTTP_FD *p_link) {
 		judge_req(p_link, &judge_result, &http_code);
 		debug_printf("leave judge_req\n");
 	}
-	debug_printf("judge:%d,%d\n", judge_result, http_code);
+	debug_printf("judge: %d,%d\n", judge_result, http_code);
 	if (judge_result == JUDGE_COMPLETE) {
 		debug_printf("enter req_dispatch\n");
 		req_dispatch(p_link);
@@ -2142,6 +1923,7 @@ static E_WS_DECODE_RET ws_unpack(HTTP_FD *p_link) {
 	if (p_link->ws_recvq.used < 6) {
 		return WS_DECODE_NEEDMORE;
 	}
+	// hexdump(p_link->ws_recvq.content, p_link->ws_recvq.used);
 	buf = p_link->ws_recvq.content;
 	fin = buf[0] & 0x80;
 	opcode = buf[0] & 0x0f;
@@ -2271,14 +2053,14 @@ int ws_handshake(HTTP_FD *p_link) {
 		if (header_upgrade != NULL && 0 == strcmp(header_upgrade, "websocket")) {
 			header_secwskey = web_header_str(p_link, "Sec-WebSocket-Key", NULL);
 			if (header_secwskey != NULL) {
-				str_temp = (char *)MY_MALLOC(strlen(header_secwskey) + strlen(ws_guid) + 1);
+				str_temp = (char *)malloc(strlen(header_secwskey) + strlen(ws_guid) + 1);
 				if (str_temp == NULL) {
 					return -1;
 				}
 				strcpy(str_temp, header_secwskey);
 				strcpy(str_temp + strlen(str_temp), ws_guid);
 				tt_sha1_bin((unsigned char *)str_temp, strlen(str_temp), sha1_output);
-				MY_FREE(str_temp);
+				free(str_temp);
 				str_temp = NULL;
 				tt_base64_encode(&b64_str, (unsigned char *)sha1_output, sizeof(sha1_output));
 				web_set_header(p_link, "Connection", "Upgrade");
@@ -2287,7 +2069,7 @@ int ws_handshake(HTTP_FD *p_link) {
 				if (web_header_str(p_link, "Sec-WebSocket-Protocol", NULL)) {
 					web_set_header(p_link, "Sec-WebSocket-Protocol", web_header_str(p_link, "Sec-WebSocket-Protocol", NULL));
 				}
-				MY_FREE(b64_str);
+				free(b64_str);
 				web_fin(p_link, 101);
 				p_link->state = STATE_WS_HANDSHAKE;
 				p_link->send_cb = upgrade_websocket;
@@ -2298,23 +2080,15 @@ int ws_handshake(HTTP_FD *p_link) {
 	return -1;
 }
 
-static void ws_read(HTTP_FD *p_link) {
-	struct evbuffer *input = NULL;
-	size_t recv_len = 0;
+static void ws_read(HTTP_FD *p_link, const uint8_t *content, size_t size) {
 	E_WS_DECODE_RET decode_ret = WS_DECODE_ERROR;
 
-	input = bufferevent_get_input(p_link->bev);
-	if (input == NULL) {
-		return;
-	}
-	recv_len = evbuffer_get_length(input);
-
-	if (0 != tt_buffer_swapto_malloced(&(p_link->ws_recvq), recv_len)) {
+	if (0 != tt_buffer_swapto_malloced(&(p_link->ws_recvq), size)) {
 		p_link->state = STATE_CLOSED;
 		return;
 	}
-	bufferevent_read(p_link->bev, p_link->ws_recvq.content + p_link->ws_recvq.used, recv_len);
-	p_link->ws_recvq.used += recv_len;
+	memcpy(p_link->ws_recvq.content + p_link->ws_recvq.used, content, size);
+	p_link->ws_recvq.used += size;
 	*(p_link->ws_recvq.content + p_link->ws_recvq.used) = '\0';
 	do {
 		decode_ret = ws_unpack(p_link);
@@ -2323,12 +2097,13 @@ static void ws_read(HTTP_FD *p_link) {
 			p_link->ws_data.content[0] = '\0';
 			p_link->ws_data.used = 0;
 		} else if (decode_ret == WS_DECODE_CLOSED) {
-			/* ws_dispatch(p_link, EVENT_ONCLOSE); EVENT_ONCLOSE will detected after ws_read returned */
 			p_link->state = STATE_CLOSED;
+			ws_dispatch(p_link, EVENT_ONCLOSE);
 			break;
 		} else if (decode_ret == WS_DECODE_ERROR) {
 			ws_dispatch(p_link, EVENT_ONERROR);
 			p_link->state = STATE_CLOSED;
+			ws_dispatch(p_link, EVENT_ONCLOSE);
 			break;
 		} else if (decode_ret == WS_DECODE_PING) {
 			ws_dispatch(p_link, EVENT_ONPING);
@@ -2346,46 +2121,44 @@ static void ws_read(HTTP_FD *p_link) {
 }
 #endif
 
-static void read_cb_web(struct bufferevent *bev, void *user_data) {
-	HTTP_FD *p_link = (HTTP_FD *)user_data;
+static void on_close_web(void *backendio, void *userdata) {
+	HTTP_FD *p_link = (HTTP_FD *)userdata;
+	p_link->state = STATE_CLOSED;
+
+printf("tqwdbg, %s %p\n", __func__, p_link);
+	apply_change(p_link);
+}
+
+static void on_read_web(void *_backend, void *userdata, uint8_t *content, size_t size) {
+	HTTP_FD *p_link = (HTTP_FD *)userdata;
 
 	p_link->tm_last_active = time(0);
 	if (p_link->state == STATE_RECVING) {
-		http_read(p_link);
+		http_read(p_link, content, size);
 	} 
 #ifdef WITH_WEBSOCKET
 	else if (p_link->state == STATE_WS_CONNECTED) {
-		ws_read(p_link);
-		if (p_link->state == STATE_CLOSED) {
-			ws_dispatch(p_link, EVENT_ONCLOSE);
-		}
+		ws_read(p_link, content, size);
 	}
 #endif
+printf("tqwdbg, %s %p state:%d\n", __func__, p_link, p_link->state);
 	apply_change(p_link);
 	return;
 }
 
-static void write_cb_web(struct bufferevent *bev, void *user_data) {
-	struct evbuffer *output = NULL;
+static void on_write_web(void *_backend, void *userdata, const uint8_t *content, size_t size) {
 	size_t sndq_len = 0;
-#ifdef WITH_WEBSOCKET
-	size_t write_len = 0;
-#endif
-	HTTP_FD *p_link = (HTTP_FD *)user_data;
+	HTTP_FD *p_link = (HTTP_FD *)userdata;
 
 	p_link->tm_last_active = time(0);
-	output = bufferevent_get_output(bev);
-	if (output == NULL) {
-		return;
+	if (size > p_link->sending_len) {
+		printf("%s, %ld > %d\n", __func__, size, p_link->sending_len);
+	} else {
+		p_link->sending_len -= size;
+		if (p_link->sending_len != 0) { /* ignore waiting send */
+			goto func_end;
+		}
 	}
-	sndq_len = evbuffer_get_length(output);
-	if (sndq_len != 0) {
-		return;
-	}
-#ifdef WITH_WEBSOCKET
-	write_len = p_link->sending_len;
-#endif
-	p_link->sending_len = 0;
 	if (p_link->state == STATE_SENDING || p_link->state == STATE_CLOSING
 #ifdef WITH_WEBSOCKET
 		 || p_link->state == STATE_WS_HANDSHAKE
@@ -2409,11 +2182,13 @@ static void write_cb_web(struct bufferevent *bev, void *user_data) {
 	}
 #ifdef WITH_WEBSOCKET
 	else if (p_link->state == STATE_WS_CONNECTED) {
-		p_link->ws_sendq.used -= write_len;
-		memmove(p_link->ws_sendq.content, p_link->ws_sendq.content + write_len, p_link->ws_sendq.used + 1);
+		p_link->ws_sendq.used -= size;
+		memmove(p_link->ws_sendq.content, p_link->ws_sendq.content + size, p_link->ws_sendq.used + 1);
 	}
 #endif
 	apply_change(p_link);
+func_end:
+	// printf("tqwdbg, leave %s\n", __func__);
 	return;
 }
 
@@ -2430,15 +2205,15 @@ static int msg_queue_check() {
 		if (p_inner->ref_cnt == 0) {
 			if (p_inner->resp_msgq != NULL) {
 				msgq_destroy(p_inner->resp_msgq);
-				MY_FREE(p_inner->resp_msgq);
+				free(p_inner->resp_msgq);
 			}
 			if (p_inner->name != NULL) {
-				MY_FREE(p_inner->name);
+				free(p_inner->name);
 			}
 			if (p_inner->payload != NULL) {
-				MY_FREE(p_inner->payload);
+				free(p_inner->payload);
 			}
-			MY_FREE(p_inner);
+			free(p_inner);
 			if (p_pre != NULL) {
 				p_pre->next = p_next;
 			} else {
@@ -2455,7 +2230,7 @@ static int msg_queue_check() {
 		}
 		ret = msg_dispatch(p_inner->name, p_inner->payload, p_inner->payload_len);
 		if (p_inner->is_sync) {
-			response = (HTTP_CALLBACK_RESPONSE *)MY_MALLOC(sizeof(HTTP_CALLBACK_RESPONSE));
+			response = (HTTP_CALLBACK_RESPONSE *)malloc(sizeof(HTTP_CALLBACK_RESPONSE));
 			if (response == NULL) {
 				emergency_printf("malloc failed.\n");
 			} else {
@@ -2487,11 +2262,11 @@ static int inner_call(const char *name, void *payload, size_t payload_len, int i
 	HTTP_INNER_MSG *p_inner = NULL;
 	HTTP_CALLBACK_RESPONSE *response = NULL;
 
-	p_inner = (HTTP_INNER_MSG *)MY_MALLOC(sizeof(HTTP_INNER_MSG));
+	p_inner = (HTTP_INNER_MSG *)malloc(sizeof(HTTP_INNER_MSG));
 	if (p_inner == NULL) {
 		emergency_printf("malloc for p_inner failed.");
 		ret = -1;
-		goto exit;
+		goto func_end;
 	}
 	memset(p_inner, 0x00, sizeof(HTTP_INNER_MSG));
 	p_inner->is_sync = is_sync;
@@ -2503,11 +2278,11 @@ static int inner_call(const char *name, void *payload, size_t payload_len, int i
 		p_inner->ref_cnt = 0;
 	}
 	if (name != NULL) {
-		p_inner->name = (char *)MY_MALLOC(strlen(name) + 1);
+		p_inner->name = (char *)malloc(strlen(name) + 1);
 		if (p_inner->name == NULL) {
 			emergency_printf("malloc for p_inner->name failed.");
 			ret = -1;
-			goto exit;
+			goto func_end;
 		}
 		strcpy(p_inner->name, name);
 	} else {
@@ -2516,19 +2291,19 @@ static int inner_call(const char *name, void *payload, size_t payload_len, int i
 	p_inner->payload = payload;
 	p_inner->payload_len = payload_len;
 	if (is_sync) {
-		p_inner->resp_msgq = (MSG_Q *)MY_MALLOC(sizeof(MSG_Q));
+		p_inner->resp_msgq = (MSG_Q *)malloc(sizeof(MSG_Q));
 		if (p_inner->resp_msgq == NULL) {
 			ret = 0;
-			goto exit;
+			goto func_end;
 		}
 		msgq_init(p_inner->resp_msgq, 0);
 	}
 	if (0 != msg_put(&g_web_inner_msg, p_inner)) {
 		emergency_printf("msg_put failed.\n");
 		ret = -1;
-		goto exit;
+		goto func_end;
 	}
-	write(g_msg_fd[1], "0", 1);
+	// write(g_msg_fd[1], "0", 1); /* TODO post event */
 	if (is_sync) {
 		tmout.tv_sec = 1; /* timeout in 1 second */
 		tmout.tv_nsec = 0;
@@ -2536,12 +2311,12 @@ static int inner_call(const char *name, void *payload, size_t payload_len, int i
 		if (response == NULL) {
 			printf("msg_timedget timeout, webserver is busy or dead.\n");
 			ret = -1;
-			goto exit;
+			goto func_end;
 		}
 		ret = response->ret;
-		MY_FREE(response);
+		free(response);
 	}
-exit:
+func_end:
 	if (p_inner != NULL) {
 		if (is_sync) {
 			p_inner->ref_cnt = 0;
@@ -2557,47 +2332,32 @@ int sync_call(const char *name, void *payload, size_t payload_len) {
 int notify_web(const char *name, void *payload, size_t payload_len, int (*callback)(int ret, void *arg), void *arg) {
 	return inner_call(name, payload, payload_len, 0, callback, arg);
 }
-void msg_cb_web(evutil_socket_t fd, short event, void *user_data) {
-	unsigned char tmp = 0;
-	while (read(fd, &tmp, 1) > 0);
+void msg_cb_web(short event, void *userdata) { /* TODO recv posted event */
 	msg_queue_check();
 }
 
-void listen_cb_web(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *addr, int socklen, void *user_data) {
+static void on_accept_web(void *backendio, void *userdata, struct sockaddr *addr) {
 	int ret = -1;
-	WEB_SERVER *server = (WEB_SERVER *)user_data;
+	WEB_SERVER *server = (WEB_SERVER *)userdata;
 	HTTP_FD *new_link = NULL;
-#ifdef WITH_IPV6
-	struct sockaddr_in6 local_addr6;
-#endif
-	struct sockaddr_in local_addr;
-	socklen_t addr_len;
-	int tcp_nodelay = 1;
 
-	new_link = (HTTP_FD *)MY_MALLOC(sizeof(HTTP_FD));
+	new_link = (HTTP_FD *)malloc(sizeof(HTTP_FD));
 	if (new_link == NULL) {
 		emergency_printf("malloc failed!\n");
-		goto exit;
+		goto func_end;
 	}
 	memset(new_link, 0x00, sizeof(HTTP_FD));
 #ifdef WITH_IPV6
 	if (server->ip_version == 6) {
-		addr_len = sizeof(struct sockaddr_in6);
-		getsockname(fd, (struct sockaddr *)&local_addr6, &addr_len);
 		inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)addr)->sin6_addr), new_link->ip_peer, sizeof(new_link->ip_peer));
 		new_link->port_peer = ntohs(((struct sockaddr_in6 *)addr)->sin6_port);
-		inet_ntop(AF_INET6, &(local_addr6.sin6_addr), new_link->ip_local, sizeof(new_link->ip_local));
-		new_link->port_local = ntohs(local_addr6.sin6_port);
 	} else
 #endif
 	{
-		addr_len = sizeof(struct sockaddr_in);
-		getsockname(fd, (struct sockaddr *)&local_addr, &addr_len);
 		inet_ntop(AF_INET, &(((struct sockaddr_in *)addr)->sin_addr), new_link->ip_peer, sizeof(new_link->ip_peer));
 		new_link->port_peer = ntohs(((struct sockaddr_in *)addr)->sin_port);
-		inet_ntop(AF_INET, &(local_addr.sin_addr), new_link->ip_local, sizeof(new_link->ip_local));
-		new_link->port_local = ntohs(local_addr.sin_port);
 	}
+	new_link->backendio = backendio;
 	new_link->server = server;
 	new_link->state = STATE_RECVING;
 	new_link->tm_last_active = new_link->tm_last_req = time(0);
@@ -2609,41 +2369,18 @@ void listen_cb_web(struct evconnlistener *listener, evutil_socket_t fd, struct s
 	tt_buffer_init(&(new_link->ws_data));
 	tt_buffer_init(&(new_link->ws_response));
 #endif
-#ifdef WITH_SSL
-	if (server->is_ssl) {
-		new_link->ssl = SSL_new(server->ssl_ctx);
-		if (new_link->ssl == NULL) {
-			emergency_printf("SSL_new failed!\n");
-			goto exit;	
-		}
-		new_link->bev = bufferevent_openssl_socket_new(g_event_base, fd, new_link->ssl, BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE);
-	} else
-#endif
-	{
-		new_link->bev = bufferevent_socket_new(g_event_base, fd, BEV_OPT_CLOSE_ON_FREE);
-	}
-	if (new_link->bev == NULL) {
-		emergency_printf("create bufferevent failed.\n");
-		return;
-	}
-
-	if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (void *)&tcp_nodelay, sizeof(tcp_nodelay)) < 0) {
-		emergency_printf("setsockopt failed.\n");
-		return;
-	}
-	bufferevent_setcb(new_link->bev, read_cb_web, write_cb_web, event_cb_web, new_link);
-	bufferevent_enable(new_link->bev, EV_READ);
-	bufferevent_disable(new_link->bev, EV_WRITE);
 	debug_printf("link from [%s]:%d.\n", new_link->ip_peer, new_link->port_peer);
-
 	new_link->prev = NULL;
 	new_link->next = g_http_links;
 	if (g_http_links) {
 		g_http_links->prev = new_link;
 	}
 	g_http_links = new_link;
+printf("tqwdbg, new_link %p\n", new_link);
+	backend_set_callback(backendio, on_read_web, on_write_web, on_close_web, new_link);
+	apply_change(new_link);
 	ret = 0;
-exit:
+func_end:
 	if (ret != 0) {
 		if (new_link != NULL) {
 			free_link_all(new_link);
@@ -2652,7 +2389,7 @@ exit:
 	return;
 }
 int ws_perf_send_data();
-static void timer_cb_web(evutil_socket_t fd, short event, void *user_data) {
+static void on_timer_web(void *userdata) {
 	HTTP_FD *p_curlink = NULL, *p_next = NULL;
 	time_t tm_now, tm_last_active, tm_last_req;
 
@@ -2678,16 +2415,16 @@ static void timer_cb_web(evutil_socket_t fd, short event, void *user_data) {
 	ws_perf_send_data();
 }
 int destroy_server(WEB_SERVER *p_svr) {
-	if (p_svr->listener != NULL) {
-		evconnlistener_free(p_svr->listener);
+	if (p_svr->backend != NULL) {
+		backend_destroy(p_svr->backend);
 	}
 	if (p_svr->name != NULL) {
-		MY_FREE(p_svr->name);
+		free(p_svr->name);
 	}
 	if (p_svr->root != NULL) {
-		MY_FREE(p_svr->root);
+		free(p_svr->root);
 	}
-	MY_FREE(p_svr);
+	free(p_svr);
 	return 0;
 }
 int destroy_server_by_id(int svr_id) {
@@ -2713,64 +2450,35 @@ int destroy_server_by_id(int svr_id) {
 	}
 	return ret;
 }
-static WEB_SERVER *create_server(const char *name, int ip_version, unsigned short port, const char *root, void (* listen_cb)(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *cli_addr, int socklen, void *user_data), void *ssl_ctx) {
+static WEB_SERVER *create_server(const char *name, int ip_version, unsigned short port, const char *root, const char *crt_file, const char *key_file, void (* on_accept)(void *backend, void *userdata, struct sockaddr *cli_addr)) {
 	int ret = -1;
-	struct sockaddr_in svr_addr;
-#ifdef WITH_IPV6
-	struct sockaddr_in6 svr_addr6;
-#endif
 	static int svr_id = 0;
 	WEB_SERVER *new_server = NULL;
 
-	if (g_event_base == NULL) {
-		goto exit;
-	}
-	new_server = (WEB_SERVER *)MY_MALLOC(sizeof(WEB_SERVER));
+	new_server = (WEB_SERVER *)malloc(sizeof(WEB_SERVER));
 	if (new_server == NULL) {
-		goto exit;
+		goto func_end;
 	}
 	memset(new_server, 0x00, sizeof(WEB_SERVER));
 	new_server->ip_version = ip_version;
 	new_server->port = port;
 	if (root != NULL) {
-		new_server->root = (char *)MY_MALLOC(strlen(root) + 1);
-		if (new_server->root == NULL) {
-			goto exit;
-		}
-		strcpy(new_server->root, root);
+		new_server->root = strdup(root);
 	}
 	if (name != NULL) {
-		new_server->name = (char *)MY_MALLOC(strlen(name) + 1);
-		if (new_server->name == NULL) {
-			goto exit;
-		}
-		strcpy(new_server->name, name);
+		new_server->name = strdup(name);;
 	}
 #ifdef WITH_SSL
-	if (ssl_ctx != NULL) {
-		new_server->ssl_ctx = (SSL_CTX *)ssl_ctx;
+	if (crt_file != NULL) {
 		new_server->is_ssl = 1;
 	} else {
 		new_server->is_ssl = 0;
 	}
 #endif
-#ifdef WITH_IPV6
-	if (ip_version == 6) {
-		memset(&svr_addr6, 0x00, sizeof(svr_addr6));
-		svr_addr6.sin6_family = AF_INET6;
-		svr_addr6.sin6_port = htons(port);
-		new_server->listener = evconnlistener_new_bind(g_event_base, listen_cb, (void *)new_server, LEV_OPT_REUSEABLE | LEV_OPT_CLOSE_ON_FREE | LEV_OPT_BIND_IPV6ONLY, -1, (struct sockaddr *)&svr_addr6, sizeof(svr_addr6));
-	} else
-#endif
-	{
-		memset(&svr_addr, 0x00, sizeof(svr_addr));
-		svr_addr.sin_family = AF_INET;
-		svr_addr.sin_port = htons(port);
-		new_server->listener = evconnlistener_new_bind(g_event_base, listen_cb, (void *)new_server, LEV_OPT_REUSEABLE | LEV_OPT_CLOSE_ON_FREE, -1, (struct sockaddr *)&svr_addr, sizeof(svr_addr));
-	}
-	if (new_server->listener == NULL) {
+	new_server->backend = backend_create(ip_version, port, crt_file, key_file, on_accept, new_server);
+	if (new_server->backend == NULL) {
 		emergency_printf("ipv%d: bind port %u failed.\n", ip_version, port);
-		goto exit;
+		goto func_end;
 	} else {
 		notice_printf("ipv%d: bind port %u success.\n", ip_version, port);
 	}
@@ -2781,16 +2489,16 @@ static WEB_SERVER *create_server(const char *name, int ip_version, unsigned shor
 	}
 	g_servers = new_server;
 	ret = 0;
-exit:
+func_end:
 	if (ret != 0) {
 		if (new_server != NULL) {
-			if (new_server->listener != NULL) {
-				evconnlistener_free(new_server->listener);
+			if (new_server->backend != NULL) {
+				backend_destroy(new_server->backend);
 			}
 			if (new_server->root != NULL) {
-				MY_FREE(new_server->root);
+				free(new_server->root);
 			}
-			MY_FREE(new_server);
+			free(new_server);
 			new_server = NULL;
 		}
 	} else {
@@ -2799,67 +2507,32 @@ exit:
 	return new_server;
 }
 WEB_SERVER *create_http(const char *name, int ip_version, unsigned short port, const char *root) {
-	return create_server(name, ip_version, port, root, listen_cb_web, NULL);
+	return create_server(name, ip_version, port, root, NULL, NULL, on_accept_web);
 }
 #ifdef WITH_SSL
-WEB_SERVER *create_https(const char *name, int ip_version, unsigned short port, const char *root, SSL_CTX *ssl_ctx) {
-	return create_server(name, ip_version, port, root, listen_cb_web, ssl_ctx);
+WEB_SERVER *create_https(const char *name, int ip_version, unsigned short port, const char *root, const char *crt_file, const char *key_file) {
+	return create_server(name, ip_version, port, root, crt_file, key_file, on_accept_web);
 }
 #endif
+
+
 int web_server_run() {
-	struct event msg_ev;
-	struct event time_ev;
-	struct timeval tv;
-
-	g_event_base = event_base_new();
-	if (g_event_base == NULL) {
-		emergency_printf("event_base_new failed.\n");
-		return -1;
-	}
-	event_assign(&time_ev, g_event_base, -1, EV_PERSIST, timer_cb_web, NULL);
-	evutil_timerclear(&tv);
-	tv.tv_sec = 0;
-	tv.tv_usec = 1000;
-	event_add(&time_ev, &tv);
-
-#ifdef _WIN32
-#define LOCAL_SOCKETPAIR_AF AF_INET
-#else
-#define LOCAL_SOCKETPAIR_AF AF_UNIX
-#endif
-	if (evutil_socketpair(LOCAL_SOCKETPAIR_AF, SOCK_STREAM, 0, g_msg_fd) != 0) {
-		printf("evutil_socketpair failed.\n");
-		goto exit;
-	}
-	evutil_make_socket_nonblocking(g_msg_fd[0]);
-	evutil_make_socket_nonblocking(g_msg_fd[1]);
-	event_assign(&msg_ev, g_event_base, g_msg_fd[0], EV_READ | EV_PERSIST, msg_cb_web, NULL);
-	if (event_add(&msg_ev, NULL) < 0) {
-		printf("event_add failed.\n");
-		goto exit;
-	}
+	backend_loop_create();
 
 #define WEB_ROOT "./static"
-	create_http("default", 4, 20080, WEB_ROOT);
 #ifdef WITH_IPV6
 	create_http("default", 6, 20080, WEB_ROOT);
+#else
+	create_http("default", 4, 20080, WEB_ROOT);
 #endif
 #ifdef WITH_SSL
-	g_default_ssl_ctx = create_ssl_ctx(g_default_svr_cert, g_default_privkey, NULL);
-	create_https("default", 4, 20443, WEB_ROOT, g_default_ssl_ctx);
 #ifdef WITH_IPV6
-	create_https("default", 6, 20443, WEB_ROOT, g_default_ssl_ctx);
+	create_https("default", 6, 20443, WEB_ROOT, "cert/server.crt", "cert/server.key");
+#else
+	create_https("default", 4, 20443, WEB_ROOT, "cert/server.crt", "cert/server.key");
 #endif
 #endif /* WITH_SSL */
-	event_base_dispatch(g_event_base);
-	if (g_event_base) {
-		event_base_free(g_event_base);
-	}
-exit:
-#ifdef WITH_SSL
-	SSL_CTX_free(g_default_ssl_ctx);
-	g_default_ssl_ctx = NULL;
-#endif
+	backend_loop_run();
 	return 0;
 }
 int init_webserver() {
@@ -2867,16 +2540,16 @@ int init_webserver() {
 	unsigned char *fcontent = NULL;
 	unsigned long fsize = 0;
 
-#ifdef _WIN32
-	WSADATA wsa_data;
-	WSAStartup(0x0201, &wsa_data);
+#ifdef __linux__
+	signal(SIGPIPE, SIG_IGN);
 #endif
+
 	fin = fopen("package.bin", "rb");
 	if (fin != NULL) {
 		fseek(fin, 0, SEEK_END);
 		fsize = ftell(fin);
 		fseek(fin, 0, SEEK_SET);
-		fcontent = (unsigned char *)MY_MALLOC(fsize);
+		fcontent = (unsigned char *)malloc(fsize);
 		if (fcontent == NULL) {
 			emergency_printf("malloc failed!\n");
 		}
@@ -2886,20 +2559,15 @@ int init_webserver() {
 			return -1; 
 		}
 	} else {
-		emergency_printf("open package.bin failed.\n");
+		debug_printf("no package.bin will use.\n");
 	}
 	msgq_init(&g_web_inner_msg, 0);
 	tt_handler_register();
-
-#ifndef _WIN32
-	signal(SIGPIPE, SIG_IGN);
-#endif
 	return 0;
 }
 
 void *web_server_thread(void *para) {
 	web_server_run(); // run web server
-	pthread_exit(NULL);
 	return NULL;
 }
 

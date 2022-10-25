@@ -3,11 +3,6 @@
 
 #include <stdarg.h>
 #include <time.h>
-#include <event2/listener.h>
-#ifdef WITH_SSL
-	#include <openssl/ssl.h>
-	#include <openssl/err.h>
-#endif
 
 #ifndef __TT_BUFFER_H__
 #include "tt_buffer.h"
@@ -83,7 +78,7 @@ typedef struct ST_HTTP_FILES{
 struct ST_HTTP_SESSION;
 struct ST_SERVER;
 typedef struct ST_HTTP_FD {
-	struct bufferevent *bev;
+	void *backendio;
 	char ip_peer[48]; /* ip address of peer */
 	char ip_local[48]; /* ip address of local */
 	unsigned short port_peer; /* port number of peer, host bytes order */
@@ -105,9 +100,6 @@ typedef struct ST_HTTP_FD {
 	struct ST_HTTP_KVPAIR *query_data; /* parsed query info included in url */
 	struct ST_HTTP_KVPAIR *post_data; /* parsed post info */
 	struct ST_HTTP_FILES *file_data; /* parsed file info */
-#ifdef WITH_SSL
-	SSL *ssl; /* used SSL that comminute with peer */
-#endif
 	struct ST_HTTP_KVPAIR *cnf_header; /* saved content by call web_set_header */
 	E_HTTP_SEND_STATE send_state; /* sending state */
 	TT_BUFFER response_head; /* header of response */
@@ -124,8 +116,9 @@ typedef struct ST_HTTP_FD {
 	struct ST_HTTP_SESSION *session;
 	struct ST_HTTP_FD *prev;
 	struct ST_HTTP_FD *next;
-	void *user_data;
-}HTTP_FD;
+	void *userdata;
+	void (*free_userdata)(void *userdata);
+} HTTP_FD;
 
 typedef struct ST_WEB_SERVER {
 	int id;
@@ -135,9 +128,8 @@ typedef struct ST_WEB_SERVER {
 	unsigned short port;
 #ifdef WITH_SSL
 	unsigned char is_ssl;
-	SSL_CTX *ssl_ctx;
 #endif
-	struct evconnlistener *listener;
+	void *backend;
 	int (* req_dispatch)(HTTP_FD p_link);
 #ifdef WITH_WEBSOCKET
 	int (* ws_dispatch)(HTTP_FD *p_link, E_WS_EVENT evt);
@@ -146,17 +138,14 @@ typedef struct ST_WEB_SERVER {
 	struct ST_WEB_SERVER *next;
 }WEB_SERVER;
 
-#ifdef WITH_SSL
-extern SSL_CTX *g_default_ssl_ctx;
-#endif
 extern HTTP_FD *g_http_links;
 extern WEB_SERVER *g_servers;
 
 extern int init_webserver();
 extern void *web_server_thread(void *para);
-WEB_SERVER *create_http(const char *name, int ip_version, unsigned short port, const char *root);
+extern WEB_SERVER *create_http(const char *name, int ip_version, unsigned short port, const char *root);
 #ifdef WITH_SSL
-WEB_SERVER *create_https(const char *name, int ip_version, unsigned short port, const char *root, SSL_CTX *ssl_ctx);
+extern WEB_SERVER *create_https(const char *name, int ip_version, unsigned short port, const char *root, const char *crt_file, const char *key_file);
 #endif
 extern int destroy_server(WEB_SERVER *p_svr);
 extern int destroy_server_by_id(int svr_id);

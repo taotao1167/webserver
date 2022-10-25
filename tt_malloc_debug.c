@@ -1,14 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
 #include <stdarg.h>
-#include <unistd.h>
 #include <string.h>
 #include <pthread.h>
-#ifndef _WIN32
+#ifdef __linux__
+#include <unistd.h>
 #include <execinfo.h>
-#endif
-#ifndef __TT_PLATFORM_H__
-#include "tt_platform.h"
 #endif
 #ifndef __TT_MALLOC_DEBUG_H__
 #include "tt_malloc_debug.h"
@@ -138,7 +136,7 @@ void my_free(void *ptr, const char *fname, int line) {
 		if (0 != memcmp((unsigned char *)ptr + target->size, RAM_TAIL, 4)) {
 			printf("%s,%d: free overflow heap %p alloc at fname %s,%d\n", fname, line, ptr, target->fname, target->line);
 		}
-		debug_printf("%s,%d: free heap %p(%" SIZET_FMT "B).\n", fname, line, ptr, target->size);
+		debug_printf("%s,%d: free heap %p(%" PRId64 "B).\n", fname, line, ptr, target->size);
 		free(ptr);
 		remove_record(target);
 	} else {
@@ -168,7 +166,7 @@ void *my_realloc(void *ptr, size_t size, const char *fname, int line) {
 		if (0 != memcmp((unsigned char *)ptr + target->size, RAM_TAIL, 4)) {
 			printf("%s,%d: realloc overflow heap %p alloc at fname %s,%d\n", fname, line, ptr, target->fname, target->line);
 		}
-		debug_printf("%s,%d: realloc heap %p(%" SIZET_FMT "B).\n", fname, line, ptr, target->size);
+		debug_printf("%s,%d: realloc heap %p(%" PRId64 "B).\n", fname, line, ptr, target->size);
 	} else {
 		printf("%s,%d: realloc invalid addr %p.\n", fname, line, ptr);
 	}
@@ -179,9 +177,9 @@ void *my_realloc(void *ptr, size_t size, const char *fname, int line) {
 	} else {
 		memcpy((unsigned char *)ptr_new + size, RAM_TAIL, 4);
 		if (target != NULL) {
-			debug_printf("%s,%d: realloc heap %p(%" SIZET_FMT "B) -> %p(%" SIZET_FMT "B).\n", fname, line, ptr, target->size, ptr_new, size);
+			debug_printf("%s,%d: realloc heap %p(%" PRId64 "B) -> %p(%" PRId64 "B).\n", fname, line, ptr, target->size, ptr_new, size);
 		} else {
-			debug_printf("%s,%d: realloc heap %p(*) -> %p(%" SIZET_FMT "B).\n", fname, line, ptr, ptr_new, size);
+			debug_printf("%s,%d: realloc heap %p(*) -> %p(%" PRId64 "B).\n", fname, line, ptr, ptr_new, size);
 		}
 		append_record(ptr_new, size, fname, line);
 	}
@@ -200,7 +198,7 @@ void show_ram(int inc_trace) {
 
 	pthread_mutex_lock(&g_ram_record_lock);
 	for (p_cur = g_ram_record_head; p_cur != NULL; p_cur = p_cur->next) {
-		printf("%s,%d: alloc %p size %" SIZET_FMT "\n", p_cur->fname, p_cur->line, p_cur->ptr, p_cur->size);
+		printf("%s,%d: alloc %p size %" PRId64 "\n", p_cur->fname, p_cur->line, p_cur->ptr, p_cur->size);
 		if (inc_trace) {
 #ifndef _WIN32
 			traces = backtrace_symbols(p_cur->backtrace, p_cur->trace_cnt);
@@ -213,7 +211,7 @@ void show_ram(int inc_trace) {
 		used += p_cur->size;
 	}
 	// printf("Memory Leak>: %" SIZET_FMT " =? %" SIZET_FMT "\n", g_ram_used, used);
-	printf("Memory malloced: %" SIZET_FMT "\n", used);
+	printf("Memory malloced: %" PRId64 "\n", used);
 	pthread_mutex_unlock(&g_ram_record_lock);
 }
 #endif

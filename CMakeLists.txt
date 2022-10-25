@@ -6,7 +6,9 @@ option(WITH_WEBSOCKET "Compile with WebSocket support." ON)
 option(WITH_SSL "Compile with SSL support, need OpenSSL." ON)
 option(WATCH_RAM "Malloc debug." OFF)
 
-find_package(Threads REQUIRED)
+set(LIBHV_INSTALL_PATH "/home/www/usr/local")
+set(LIBHV_INCLUDE_PATH "${LIBHV_INSTALL_PATH}/include")
+set(LIBHV_LIB_PATH "${LIBHV_INSTALL_PATH}/lib")
 
 if (WITH_IPV6)
 	ADD_DEFINITIONS(-DWITH_IPV6)
@@ -26,8 +28,6 @@ if (WIN32)
 	# target_link_libraries(app ws2_32)
 	include_directories("/mingw64/include")
 	link_directories("/mingw64/lib")
-else()
-	add_compile_options(-rdynamic)
 endif()
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -38,14 +38,18 @@ SET(SRCLIST tt_web.c tt_web_dispatch.c tt_file.c tt_buffer.c tt_malloc_debug.c t
 SET(LIBRARY_OUTPUT_PATH "${CMAKE_BINARY_DIR}/lib")
 SET(EXECUTABLE_OUTPUT_PATH "${CMAKE_BINARY_DIR}/bin")
 
-add_compile_options(-Wall -pthread -O3)
+set(CMAKE_C_FLAGS "-g3 -Wall -pthread")
 
-add_library(webserver ${SRCLIST})
+add_library(webserver STATIC ${SRCLIST})
+target_include_directories(webserver PUBLIC ${LIBHV_INCLUDE_PATH})
+target_link_libraries(webserver PUBLIC hv_static)
 
 link_directories(${LIBRARY_OUTPUT_PATH})
 add_executable(app main.c)
-target_link_libraries(app pthread webserver event)
+target_link_libraries(app PUBLIC pthread webserver)
 if (WITH_SSL)
- 	target_link_libraries(app crypto ssl event_openssl)
+	target_link_libraries(app PUBLIC crypto ssl)
 endif()
 
+add_library(hv_static STATIC IMPORTED)
+set_target_properties(hv_static PROPERTIES IMPORTED_LOCATION ${LIBHV_LIB_PATH}/libhv_static.a)

@@ -1,15 +1,15 @@
 #include <stdio.h>
-#include <unistd.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
 #include <time.h>
 #include <errno.h>
+#ifdef __linux__
+#include <unistd.h>
 #include <pthread.h>
 #include <signal.h>
-#ifndef _WIN32
 #include <fcntl.h>
 #include <sys/file.h>
+#include <execinfo.h>
 #endif
 #ifndef __TT_WEB_H__
 #include "tt_web.h"
@@ -127,6 +127,35 @@ int stop_daemon() {
 }
 #endif /* _WIN32 */
 
+#define TRACE_SIZE 64
+static void stackinfo(int signo) {
+    int nptrs = 0;
+    void *buffer[TRACE_SIZE] = {NULL};
+    char fname[128] = {0};
+    int fd = 0;
+    const char *sig = NULL;
+
+    switch (signo) {
+        case SIGSEGV: sig = "SIGSEGV"; break;
+        case SIGABRT: sig = "SIGABRT"; break;
+        case SIGPIPE: sig = "SIGPIPE"; break;
+        default: sig = "UNKNOWN";
+    }
+    sprintf(fname, "%ld_%s.crash", time(NULL), sig);
+    fd = open(fname, O_WRONLY | O_CREAT, 0664);
+    nptrs = backtrace(buffer, TRACE_SIZE);
+    if (fd != -1) {
+        backtrace_symbols_fd(buffer, nptrs, fd);
+        close(fd);
+    } else {
+        backtrace_symbols_fd(buffer, nptrs, STDERR_FILENO);
+    }
+}
+static void handler(int signo) {
+    stackinfo(signo);
+    signal(signo, SIG_DFL);
+    raise(signo);
+}
 int main(int argc, char **argv) {
 	int ret = 0;
 #ifndef _WIN32
@@ -135,6 +164,12 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 #endif
+#if 0
+    signal(SIGSEGV, handler);
+    signal(SIGABRT, handler);
+    signal(SIGFPE, handler);
+#endif
+
 	if (0 != init_main()) {
 		return -1;
 	}

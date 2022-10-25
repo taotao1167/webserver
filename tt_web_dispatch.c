@@ -1,17 +1,15 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <string.h>
-#include <unistd.h>
 #include <time.h>
-#ifdef _WIN32
-#else
-#include <sys/wait.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/time.h>
-#endif
-#ifndef __TT_PLATFORM_H__
-#include "tt_platform.h"
+#ifdef __linux__
+	#include <unistd.h>
+	#include <sys/wait.h>
+	#include <sys/types.h>
+	#include <sys/stat.h>
+	#include <sys/time.h>
 #endif
 #ifndef __TT_BUFFER_H__
 #include "tt_buffer.h"
@@ -36,17 +34,6 @@
 #endif
 #ifndef __TT_SHA1_H__
 #include "tt_sha1.h"
-#endif
-
-#ifdef WATCH_RAM
-#include "tt_malloc_debug.h"
-#define MY_MALLOC(x) my_malloc((x), __FILE__, __LINE__)
-#define MY_FREE(x) my_free((x), __FILE__, __LINE__)
-#define MY_REALLOC(x, y) my_realloc((x), (y), __FILE__, __LINE__)
-#else
-#define MY_MALLOC(x) malloc((x))
-#define MY_FREE(x) free((x))
-#define MY_REALLOC(x, y) realloc((x), (y))
 #endif
 
 #ifndef FILE_BUFFER_SIZE
@@ -182,7 +169,7 @@ int http_test_upload(HTTP_FD *p_link) {
 
 		p_upfile = web_file_data(p_link, "file3");
 		if (p_upfile != NULL) {
-			fname = (char *)MY_MALLOC(strlen(p_upfile->fname) + 2);
+			fname = (char *)malloc(strlen(p_upfile->fname) + 2);
 			if (fname != NULL) {
 				sprintf(fname, "/%s", p_upfile->fname);
 				if (0 == strcmp("/favicon.ico", fname)) {
@@ -257,7 +244,7 @@ int http_test_upload_large(HTTP_FD *p_link) {
 				}
 			}
 		}
-		web_printf(p_link, "{\"retCode\":[\"%s\"], \"stored\":%" SIZET_FMT "}", retCode, file_stored);
+		web_printf(p_link, "{\"retCode\":[\"%s\"], \"stored\":%" PRId64 "}", retCode, file_stored);
 		web_fin(p_link, 200);
 	} else {
 		web_fin(p_link, 403);
@@ -287,9 +274,9 @@ int http_svr_conf(HTTP_FD *p_link) {
 #ifdef WITH_SSL
 			if (web_post_str(p_link, "ssl", "0")[0] != '0') {
 				if (root[0] != '\0') {
-					p_svr = create_https(svr_name, ip_version, port, root, g_default_ssl_ctx);
+					p_svr = create_https(svr_name, ip_version, port, root, NULL, NULL);
 				} else {
-					p_svr = create_https(svr_name, ip_version, port, NULL, g_default_ssl_ctx);
+					p_svr = create_https(svr_name, ip_version, port, NULL, NULL, NULL);
 				}
 			} else
 #endif
@@ -380,7 +367,7 @@ int http_session_list(HTTP_FD *p_link) {
 			web_printf(p_link, "\"heartbeat\":\"%04d/%02d/%02d %02d:%02d:%02d\",", l_tm->tm_year + 1900, l_tm->tm_mon + 1, l_tm->tm_mday, l_tm->tm_hour, l_tm->tm_min, l_tm->tm_sec);
 			web_printf(p_link, "\"uname\":\"%s\",", p_cur->uname ? p_cur->uname : "[Unknown]");
 			web_printf(p_link, "\"level\":\"%d\",", p_cur->level);
-			web_printf(p_link, "\"online\":\"%02" TIMET_FMT ":%02" TIMET_FMT ":%02" TIMET_FMT "\"", (now - p_cur->login_time) / 3600, ((now - p_cur->login_time) % 3600) / 60, (now - p_cur->login_time) % 60);
+			web_printf(p_link, "\"online\":\"%02" PRId64 ":%02" PRId64 ":%02" PRId64 "\"", (now - p_cur->login_time) / 3600, ((now - p_cur->login_time) % 3600) / 60, (now - p_cur->login_time) % 60);
 		} else {
 			web_printf(p_link, "\"isOnline\":false,\"signin\":\"--\",\"heartbeat\":\"--\",\"uname\":\"--\",\"level\":\"--\",\"online\":\"--\"");
 		}
@@ -672,14 +659,14 @@ int http_show_malloc(HTTP_FD *p_link) {
 	return 0;
 }
 static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "content", only used by web server */
-	SENDING_INFO *send_info = (SENDING_INFO *)p_link->user_data;
+	SENDING_INFO *send_info = (SENDING_INFO *)p_link->userdata;
 	HTTP_RANGE *p_range = send_info->range;
 	FILE *fp = (FILE *)send_info->fp;
 	size_t split_len = 0, read_len = 0;
 	static unsigned char *content = NULL;
 
 	if (content == NULL) {
-		content = (unsigned char *)MY_MALLOC(FILE_BUFFER_SIZE);
+		content = (unsigned char *)malloc(FILE_BUFFER_SIZE);
 	}
 	if (p_range != NULL) {
 		if (send_info->offset == 0) { /* content sending not start yet */
@@ -699,7 +686,7 @@ static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "co
 		if (send_info->boundary != NULL) { /* multi range defined */
 			web_printf(p_link, "--%s\r\n", send_info->boundary);
 			web_printf(p_link, "Content-Type: %s\r\n", send_info->mime_type);
-			web_printf(p_link, "Content-Range: bytes %" SIZET_FMT "-%" SIZET_FMT "/%" SIZET_FMT "\r\n\r\n", p_range->start, p_range->end, send_info->size);
+			web_printf(p_link, "Content-Range: bytes %" PRId64 "-%" PRId64 "/%" PRId64 "\r\n\r\n", p_range->start, p_range->end, send_info->size);
 		}
 		if (p_range != NULL) {
 			send_info->offset = p_range->start;
@@ -732,6 +719,19 @@ static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "co
 	}
 	return 0;
 }
+static void send_info_close(void *_send_info) {
+	SENDING_INFO *send_info = (SENDING_INFO *)_send_info;
+	if (send_info->fp != NULL) {
+		fclose(send_info->fp);
+	}
+	if (send_info->mime_type != NULL) {
+		free(send_info->mime_type);
+	}
+	if (send_info->boundary != NULL) {
+		free(send_info->boundary);
+	}
+	free(send_info);
+}
 int http_send_file(HTTP_FD *p_link) {
 	int resp_code = 200;
 	size_t con_len = 0;
@@ -744,7 +744,7 @@ int http_send_file(HTTP_FD *p_link) {
 		web_fin(p_link, 500);
 		return 0;
 	}
-	fullpath = (char *)MY_MALLOC(strlen(p_link->server->root) + strlen(p_link->path) + 2);
+	fullpath = (char *)malloc(strlen(p_link->server->root) + strlen(p_link->path) + 2);
 	if (fullpath == NULL) {
 		web_fin(p_link, 500);
 		return 0;
@@ -759,7 +759,7 @@ int http_send_file(HTTP_FD *p_link) {
 		strcat(fullpath, p_link->path);
 	}
 
-	send_info = (SENDING_INFO *)MY_MALLOC(sizeof(SENDING_INFO));
+	send_info = (SENDING_INFO *)malloc(sizeof(SENDING_INFO));
 	if (send_info == NULL) {
 		resp_code = 500;
 		goto exit;
@@ -785,7 +785,7 @@ int http_send_file(HTTP_FD *p_link) {
 			p_range->end = send_info->size - 1;
 		}
 		if (p_range->end < p_range->start || p_range->end >= send_info->size) {
-printf("will response 416, %s %d, %" SIZET_FMT " to %" SIZET_FMT " / %" SIZET_FMT "\n", __FILE__, __LINE__, p_range->start, p_range->end, send_info->size);
+printf("will response 416, %s %d, %" PRId64 " to %" PRId64 " / %" PRId64 "\n", __FILE__, __LINE__, p_range->start, p_range->end, send_info->size);
 			resp_code = 416;
 			goto exit;
 		}
@@ -793,25 +793,20 @@ printf("will response 416, %s %d, %" SIZET_FMT " to %" SIZET_FMT " / %" SIZET_FM
 
 	if (p_link->range_data == NULL) {
 		resp_code = 200;
-		sprintf(str_conlen, "%" SIZET_FMT, send_info->size);
+		sprintf(str_conlen, "%" PRId64, send_info->size);
 	} else if (p_link->range_data->next == NULL) {
 		resp_code = 206;
 		p_range = p_link->range_data;
-		snprintf(str_temp, sizeof(str_temp) - 1, "bytes %" SIZET_FMT "-%" SIZET_FMT "/%" SIZET_FMT, p_range->start, p_range->end, send_info->size);
+		snprintf(str_temp, sizeof(str_temp) - 1, "bytes %" PRId64 "-%" PRId64 "/%" PRId64, p_range->start, p_range->end, send_info->size);
 		web_set_header(p_link, "Content-Range", str_temp);
-		sprintf(str_conlen, "%" SIZET_FMT, p_range->end - p_range->start + 1);
+		sprintf(str_conlen, "%" PRId64, p_range->end - p_range->start + 1);
 	} else {
 		resp_code = 206;
 		mime_type = get_mime_type(p_link->path);
-		send_info->mime_type = (char *)MY_MALLOC(strlen(mime_type) + 1);
-		if (send_info->mime_type == NULL) {
-			resp_code = 500;
-			goto exit;
-		}
-		strcpy(send_info->mime_type, mime_type);
+		send_info->mime_type = strdup(mime_type);
 
 		snprintf(str_temp, sizeof(str_temp) - 1, "ip:%s,port:%u,time:%ld,rand:%d", p_link->ip_peer, p_link->port_peer, clock(), rand());
-		send_info->boundary = (char *)MY_MALLOC(41);
+		send_info->boundary = (char *)malloc(41);
 		if (send_info->boundary == NULL) {
 			resp_code = 500;
 			goto exit;
@@ -823,23 +818,24 @@ printf("will response 416, %s %d, %" SIZET_FMT " to %" SIZET_FMT " / %" SIZET_FM
 		for (p_range = p_link->range_data; p_range != NULL; p_range = p_range->next) {
 			con_len += 2 + strlen(send_info->boundary) + 2; /* "--boundary\r\n" */
 			con_len += strlen("Content-Type: ") + strlen(mime_type) + 2; /* "Content-Type: mime_type\r\n" */
-			snprintf(str_temp, sizeof(str_temp) - 1, "bytes %" SIZET_FMT "-%" SIZET_FMT "/%" SIZET_FMT, p_range->start, p_range->end, send_info->size);
+			snprintf(str_temp, sizeof(str_temp) - 1, "bytes %" PRId64 "-%" PRId64 "/%" PRId64, p_range->start, p_range->end, send_info->size);
 			con_len += strlen("Content-Range: ") + strlen(str_temp) + 2; /* "Content-Range: bytes start-end/size\r\n" */
 			con_len += 2 + (p_range->end - p_range->start + 1) + 2; /* \r\ncontent\r\n" */
 		}
 		con_len += 2 + strlen(send_info->boundary) + 4; /* "--boundary--\r\n" */
-		sprintf(str_conlen, "%" SIZET_FMT, con_len);
+		sprintf(str_conlen, "%" PRId64, con_len);
 	}
 
 	send_info->range = p_link->range_data;
-	p_link->user_data = send_info;
+	p_link->userdata = send_info;
+	p_link->free_userdata = send_info_close;
 
 	web_set_header(p_link, "Content-Length", str_conlen);
 	p_link->send_cb = send_file;
 exit:
 	web_fin(p_link, resp_code);
 	if (fullpath != NULL) {
-		MY_FREE(fullpath);
+		free(fullpath);
 	}
 	return 0;
 }
@@ -850,7 +846,7 @@ int http_ws_test(HTTP_FD *p_link, E_WS_EVENT event) {
 			printf("websocket [%s] %s:%u ONOPEN.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
 		case EVENT_ONMESSAGE:
 			printf("websocket [%s] %s:%u ONMESSAGE.\n", p_link->path, p_link->ip_peer, p_link->port_peer);
-			ws_printf(p_link, "received %" SIZET_FMT " bytes: \"%s\"", p_link->ws_data.used, p_link->ws_data.content);
+			ws_printf(p_link, "received %" PRId64 " bytes: \"%s\"", p_link->ws_data.used, p_link->ws_data.content);
 			ws_pack(p_link, WS_OPCODE_TEXT);
 			break;
 		case EVENT_ONCLOSE:
@@ -915,7 +911,7 @@ typedef struct PerfInfo {
 	size_t fsize;
 	size_t foffset;
 	double tm_start; /* sec */
-	double speed; /* Mbps */
+	double speed; /* kbps */
 	int64_t sended_5s; /* Bytes */
 	uint8_t *payload;
 	size_t payload_size;
@@ -987,7 +983,8 @@ int http_ws_perf(HTTP_FD *p_link, E_WS_EVENT event) {
 			if (perf_info != NULL) {
 				memset(perf_info, 0x00, sizeof(PerfInfo));
 				perf_info->flags = atoi(web_query_str(p_link, "flags", "65535"));
-				perf_info->speed = atof(web_query_str(p_link, "mbps", "20")) * (1024 * 1024 / 8);
+				perf_info->speed = atof(web_query_str(p_link, "kbps", "20000")) * (1024 / 8);
+printf("speed %.3lf\n", perf_info->speed);
 				perf_info->payload_size = 1024;
 				perf_info->payload = (uint8_t *)malloc(perf_info->payload_size);
 				perf_info->fin = fopen(web_query_str(p_link, "fname", "test_20Mbps.h264"), "rb");
@@ -1092,7 +1089,7 @@ int http_callback_default(HTTP_FD *p_link) {
 }
 
 int msg_test(const char *name, void *buf, size_t len) {
-	printf("%s %p %" SIZET_FMT "\n", name, buf, len);
+	printf("%s %p %" PRId64 "\n", name, buf, len);
 	return 0;
 }
 
@@ -1200,7 +1197,7 @@ int req_dispatch(HTTP_FD *p_link) {
 
 #ifdef WITH_WEBSOCKET
 int ws_dispatch(HTTP_FD *p_link, E_WS_EVENT event) {
-	int (*callback)(HTTP_FD *p_link, E_WS_EVENT);
+	int (*callback)(HTTP_FD *p_link, E_WS_EVENT) = NULL;
 
 	callback = tt_ws_handler_get(p_link->path);
 	if (callback) {
