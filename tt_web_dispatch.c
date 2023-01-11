@@ -701,6 +701,7 @@ static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "co
 	send_info->offset += read_len;
 	web_write(p_link, content, read_len);
 	p_link->state = STATE_SENDING;
+	p_link->sending_len = read_len;
 	p_link->send_state = SENDING_ENTITY;
 	if ((p_range == NULL && send_info->offset == send_info->size) || (p_range != NULL && send_info->offset == p_range->end + 1)) {
 		if (send_info->boundary != NULL) { /* multi range defined */

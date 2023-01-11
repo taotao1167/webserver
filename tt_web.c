@@ -39,11 +39,11 @@
 #endif
 
 #define emergency_printf(fmt,...) printf("%s %d: ", __FILE__, __LINE__);printf(fmt, ##__VA_ARGS__)
-//#define emergency_printf(fmt,...)
+// #define emergency_printf(fmt,...)
 #define error_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
-//#define error_printf(fmt,...)
+// #define error_printf(fmt,...)
 #define notice_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
-//#define notice_printf(fmt, ...)
+// #define notice_printf(fmt, ...)
 // #define debug_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
 #define debug_printf(fmt, ...)
 
@@ -301,18 +301,6 @@ static int backend_write(void *_backendio, const uint8_t *content, size_t size) 
 		goto func_end;
 	}
 	hio_write(backendio->io, content, size);
-	ret = 0;
-func_end:
-	return ret;
-}
-static int backend_close(void *_backendio) {
-	int ret = -1;
-	BackendIo *backendio = NULL;
-
-	backendio = (BackendIo *)_backendio;
-	if (backendio == NULL) {
-		goto func_end;
-	}
 	ret = 0;
 func_end:
 	return ret;
@@ -663,8 +651,7 @@ HTTP_FILES *web_file_list(HTTP_FD *p_link, const char *key) {
 static int parse_files(HTTP_FD *p_link, unsigned char *p_entity, unsigned int u_entitylen, const char *p_boundary, E_HTTP_JUDGE *judge_result, int *http_code) {
 	char *p_boundary_start = NULL, *p_boundary_split = NULL, *p_boundary_end = NULL;
 	char *p_key = NULL, *p_value = NULL, *p_fkey = NULL, *p_fname = NULL, *p_ftype = NULL;
-	unsigned char *p_fcontent = NULL;
-	unsigned char *p_start = NULL, *p_end = NULL, *p_entityend = NULL;
+	unsigned char *p_fcontent = NULL, *p_start = NULL, *p_end = NULL, *p_entityend = NULL;
 	int fsize = 0, boundary_split_len = 0, boundary_end_len = 0;
 	char *p_start_dis = NULL, *p_end_dis = NULL, *p_key_dis = NULL, *p_value_dis = NULL;
 	int ret = -1, isend = 0, i = 0, boundary_match = 0;
@@ -1261,7 +1248,7 @@ func_end:
 static int judge_req(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_code) {
 	char p_key[16], p_value[16], *p_headend = NULL;
 	const char *p_start = NULL, *p_end = NULL;
-	int ret = -1, is_complete = 0;
+	int ret = -1;
 	unsigned int cur_entity_len = 0, head_len = 0;
 
 	*http_code = 0;
@@ -1687,6 +1674,7 @@ int web_fin(HTTP_FD *p_link, int http_code) {
 		p_link->state = STATE_SENDING;
 	}
 	p_link->send_state = SENDING_HEAD;
+	p_link->sending_len = p_link->response_head.used;
 	ret = 0;
 func_end:
 	return ret;
@@ -1765,13 +1753,12 @@ static int free_link_all(HTTP_FD *p_link) {
 	tt_buffer_free(&(p_link->ws_data));
 	tt_buffer_free(&(p_link->ws_response));
 #endif
-printf("tqwdbg, free link %p\n", p_link);
 	free(p_link);
 	return 0;
 }
 
 static void apply_change(HTTP_FD *p_link) {
-	// printf("tqwdbg, enter %s\n", __func__);
+printf("tqwdbg, %s enter apply_change %d %d\n", p_link->path, p_link->state, p_link->send_state);
 	if (p_link->state == STATE_CLOSED) {
 		if (p_link->backendio != NULL) {
 			backend_set_callback(p_link->backendio, NULL, NULL, NULL, NULL);
@@ -1793,46 +1780,36 @@ static void apply_change(HTTP_FD *p_link) {
 	if (p_link->state == STATE_RECVING) {
 		backend_enable_read(p_link->backendio);
 	} else if (p_link->state == STATE_SENDING || p_link->state == STATE_CLOSING) {
-		if (p_link->sending_len == 0) {
+
+		if (p_link->sending_len != 0) {
 			if (p_link->send_state == SENDING_HEAD) {
-				p_link->sending_len = p_link->response_head.used;
-				backend_write(p_link->backendio, p_link->response_head.content, p_link->response_head.used);
+				backend_write(p_link->backendio, p_link->response_head.content, p_link->sending_len);
 			} else {
-				p_link->sending_len = p_link->response_entity.used;
-				backend_write(p_link->backendio, p_link->response_entity.content, p_link->response_entity.used);
+printf("tqwdbg, %s, sending_len: %d, send_state:%d, entity:%ld\n", p_link->path, p_link->sending_len, p_link->send_state, p_link->response_entity.used);
+				backend_write(p_link->backendio, p_link->response_entity.content, p_link->sending_len);
 			}
-		} else {
 		}
 #ifdef WITH_WEBSOCKET
 	} else if (p_link->state == STATE_WS_HANDSHAKE) {
-		if (p_link->sending_len == 0) {
+		if (p_link->sending_len != 0) {
 			if (p_link->send_state == SENDING_HEAD) {
-				p_link->sending_len = p_link->response_head.used;
-				backend_write(p_link->backendio, p_link->response_head.content, p_link->response_head.used);
+				backend_write(p_link->backendio, p_link->response_head.content, p_link->sending_len);
 			} else {
-				p_link->sending_len = p_link->response_entity.used;
-				backend_write(p_link->backendio, p_link->response_entity.content, p_link->response_entity.used);
+				backend_write(p_link->backendio, p_link->response_entity.content, p_link->sending_len);
 			}
 		}
 	} else if (p_link->state == STATE_WS_CONNECTED) {
-		if (p_link->ws_sendq.used > 0) {
-			if (p_link->sending_len == 0) {
-				p_link->sending_len = p_link->ws_sendq.used;
-				backend_write(p_link->backendio, p_link->ws_sendq.content, p_link->ws_sendq.used);
-			} else {
-			}
-		} else {
+		if (p_link->sending_len != 0) {
+			backend_write(p_link->backendio, p_link->ws_sendq.content, p_link->ws_sendq.used);
 		}
 #endif
 	} else {
 		emergency_printf("unexpected state %d!\n", p_link->state);
 	}
 func_end:
-	// printf("tqwdbg, leave %s\n", __func__);
 	return;
 }
 static void http_read(HTTP_FD *p_link, const uint8_t *content, size_t size) {
-	struct evbuffer *input = NULL;
 	int http_code = 500;	
 	E_HTTP_JUDGE judge_result = JUDGE_ERROR;
 	time_t tm_now;
@@ -2125,7 +2102,6 @@ static void on_close_web(void *backendio, void *userdata) {
 	HTTP_FD *p_link = (HTTP_FD *)userdata;
 	p_link->state = STATE_CLOSED;
 
-printf("tqwdbg, %s %p\n", __func__, p_link);
 	apply_change(p_link);
 }
 
@@ -2141,22 +2117,24 @@ static void on_read_web(void *_backend, void *userdata, uint8_t *content, size_t
 		ws_read(p_link, content, size);
 	}
 #endif
-printf("tqwdbg, %s %p state:%d\n", __func__, p_link, p_link->state);
 	apply_change(p_link);
 	return;
 }
 
 static void on_write_web(void *_backend, void *userdata, const uint8_t *content, size_t size) {
-	size_t sndq_len = 0;
 	HTTP_FD *p_link = (HTTP_FD *)userdata;
 
 	p_link->tm_last_active = time(0);
+printf("tqwdbg, %s, %zu / %d\n", p_link->path, size, p_link->sending_len);
 	if (size > p_link->sending_len) {
-		printf("%s, %ld > %d\n", __func__, size, p_link->sending_len);
+printf("tqwdbg, %s, %ld > %d\n", __func__, size, p_link->sending_len);
 	} else {
 		p_link->sending_len -= size;
 		if (p_link->sending_len != 0) { /* ignore waiting send */
+printf("tqwdbg, %s, p_link->sending_len:%d\n", p_link->path, p_link->sending_len);
 			goto func_end;
+		} else {
+printf("tqwdbg, %s send ok\n", p_link->path);
 		}
 	}
 	if (p_link->state == STATE_SENDING || p_link->state == STATE_CLOSING
@@ -2165,8 +2143,11 @@ static void on_write_web(void *_backend, void *userdata, const uint8_t *content,
 #endif
 			) {
 		if (p_link->send_state == SENDING_HEAD && p_link->response_entity.used != 0) {
+printf("tqwdbg, %s, SENDING_ENTITY\n", p_link->path);
+			p_link->sending_len = p_link->response_entity.used; /* set by on_write_web / reset_link / web_fin */
 			p_link->send_state = SENDING_ENTITY;
 		} else {
+printf("tqwdbg, %s, send_state:%d entity:%ld\n", p_link->path, p_link->send_state, p_link->response_entity.used);
 			if (p_link->send_cb != NULL) {
 				debug_printf("enter send_cb\n");
 				p_link->send_cb(p_link);
@@ -2175,6 +2156,7 @@ static void on_write_web(void *_backend, void *userdata, const uint8_t *content,
 				if (p_link->state == STATE_CLOSING) {
 					p_link->state = STATE_CLOSED;
 				} else {
+printf("tqwdbg, %s, reset\n", p_link->path);
 					reset_link_for_continue(p_link);
 				}
 			}
@@ -2184,11 +2166,13 @@ static void on_write_web(void *_backend, void *userdata, const uint8_t *content,
 	else if (p_link->state == STATE_WS_CONNECTED) {
 		p_link->ws_sendq.used -= size;
 		memmove(p_link->ws_sendq.content, p_link->ws_sendq.content + size, p_link->ws_sendq.used + 1);
+		if (p_link->ws_sendq.used > 0) {
+			p_link->sending_len = p_link->ws_sendq.used;
+		}
 	}
 #endif
 	apply_change(p_link);
 func_end:
-	// printf("tqwdbg, leave %s\n", __func__);
 	return;
 }
 
@@ -2376,7 +2360,6 @@ static void on_accept_web(void *backendio, void *userdata, struct sockaddr *addr
 		g_http_links->prev = new_link;
 	}
 	g_http_links = new_link;
-printf("tqwdbg, new_link %p\n", new_link);
 	backend_set_callback(backendio, on_read_web, on_write_web, on_close_web, new_link);
 	apply_change(new_link);
 	ret = 0;
