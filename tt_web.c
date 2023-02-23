@@ -15,6 +15,7 @@
 	#include <sys/time.h>
 	#include <sys/socket.h>
 	#include <netinet/in.h>
+	#include <netinet/tcp.h> /* for TCP_NODELAY */
 	#include <arpa/inet.h> /* inet_ntop */
 #endif
 #ifndef __TT_BUFFER_H__
@@ -285,6 +286,7 @@ static void backend_on_accept(struct evconnlistener *listener, evutil_socket_t f
 	Backend *backend = NULL;
 	BackendIo *backendio = NULL;
 	char ip[48];
+	int tcp_nodelay = 1;
 
 	backend = (Backend *)userdata;
 	if (backend == NULL) {
@@ -301,6 +303,10 @@ static void backend_on_accept(struct evconnlistener *listener, evutil_socket_t f
     }
 	inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)sa)->sin6_addr), ip, sizeof(ip)); /* TODO IPv4/IPv6 */
 	debug_printf("backend on_accept: [%s]:%d\n", ip, ntohs(((struct sockaddr_in6 *)sa)->sin6_port)); /* TODO IPv4/IPv6 */
+	if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (void *)&tcp_nodelay, sizeof(tcp_nodelay)) < 0) {
+		emergency_printf("setsockopt failed.\n");
+		goto func_end;
+	}
     bufferevent_setcb(backendio->io, backendio_on_read, backendio_on_write, backendio_on_event, backendio);
     bufferevent_enable(backendio->io, EV_READ);
     bufferevent_disable(backendio->io, EV_WRITE);
@@ -2609,13 +2615,16 @@ int web_server_run() {
 	backend_loop_create(web_on_timer, NULL);
 
 #define WEB_ROOT "./static"
-	create_http("default", 4, 20080, WEB_ROOT);
 #ifdef WITH_IPV6
 	create_http("default", 6, 20080, WEB_ROOT);
+#else
+	create_http("default", 4, 20080, WEB_ROOT);
 #endif
 #ifdef WITH_SSL
 #ifdef WITH_IPV6
 	create_https("default", 6, 20443, WEB_ROOT, "cert/server.crt", "cert/server.key");
+#else
+	create_https("default", 4, 20080, WEB_ROOT, "cert/server.crt", "cert/server.key");
 #endif
 	// create_https("default", 4, 20443, WEB_ROOT, "cert/server.crt", "cert/server.key");
 #endif /* WITH_SSL */
