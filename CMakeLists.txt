@@ -42,7 +42,7 @@ set(CMAKE_C_FLAGS "-g3 -Wall -pthread")
 
 add_library(webserver STATIC ${SRCLIST})
 target_include_directories(webserver PUBLIC ${LIBHV_INCLUDE_PATH})
-target_link_libraries(webserver PUBLIC hv_static)
+target_link_libraries(webserver PUBLIC event)
 
 link_directories(${LIBRARY_OUTPUT_PATH})
 add_executable(app main.c)
@@ -51,5 +51,3 @@ if (WITH_SSL)
 	target_link_libraries(app PUBLIC crypto ssl)
 endif()
 
-add_library(hv_static STATIC IMPORTED)
-set_target_properties(hv_static PROPERTIES IMPORTED_LOCATION ${LIBHV_LIB_PATH}/libhv_static.a)
