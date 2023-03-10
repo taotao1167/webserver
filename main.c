@@ -164,7 +164,7 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 #endif
-#if 1
+#if 0
     signal(SIGSEGV, handler);
     signal(SIGABRT, handler);
     signal(SIGFPE, handler);

@@ -38,7 +38,7 @@ var myapp = new Vue({
 		data: {
 			connected: false,
 			formData: {
-				wsurl: "ws://" + document.location.host + "/ws/test",
+				wsurl: document.location.protocol.replace("http", "ws") + "//" + document.location.host + "/ws/test",
 				sendBuf: "hello, world!"
 			}
 		},

@@ -46,8 +46,8 @@
 // #define error_printf(fmt,...)
 #define notice_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
 // #define notice_printf(fmt, ...)
- #define debug_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
-// #define debug_printf(fmt, ...)
+// #define debug_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#define debug_printf(fmt, ...)
 
 /* map status code and status string */
 typedef struct ST_HTTP_CODE_MAP {
@@ -126,7 +126,75 @@ static const char *g_err_500_head = \
 static const char *g_err_500_entity = \
 	"<html><h1>500 Internal Server Error</h1></html>";
 
+static void hexdump(void *_buf, size_t size) {
+	unsigned char *buf = (unsigned char *)_buf;
+	size_t i = 0, offset = 0;
+	char tmp = '\0';
+	for (offset = 0; offset < size; offset += 16) {
+		printf("%08x: ", (unsigned int)offset);
+		for (i = 0; i < 16; i++) {
+			if (offset + i < size) {
+				printf("%02x ", *(buf + offset + i));
+			} else {
+				printf("   ");
+			}
+		}
+		printf("  ");
+		for (i = 0; i < 16; i++) {
+			if (offset + i < size) {
+				tmp = *(buf + offset + i);
+				if (tmp < ' ' || tmp > '~') {
+					printf(".");
+				} else {
+					printf("%c", tmp);
+				}
+			}
+		}
+		printf("\n");
+	}
+}
+
 /* tcp/ssl backend begin */
+#ifdef WITH_SSL
+#include <event2/bufferevent_ssl.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+static SSL_CTX *backend_create_ssl_ctx(const char *crt_file, const char *key_file) {
+	SSL_CTX *ssl_ctx = NULL;
+	int ret = -1;
+
+	ssl_ctx = SSL_CTX_new(SSLv23_server_method());
+	if (ssl_ctx == NULL) {
+		emergency_printf("create ssl_ctx failed.\n");
+		goto func_end;
+	}
+	if (SSL_CTX_use_certificate_file(ssl_ctx, crt_file, SSL_FILETYPE_PEM) <= 0) {
+		emergency_printf("import certificate failed.\n");
+		goto func_end;
+	}
+	if (key_file == NULL) {
+		key_file = crt_file;
+	}
+	if (SSL_CTX_use_PrivateKey_file(ssl_ctx, key_file, SSL_FILETYPE_PEM) <= 0) {
+		emergency_printf("import privkey failed.\n");
+		goto func_end;
+	}
+
+	if (!SSL_CTX_check_private_key(ssl_ctx)) {
+		emergency_printf("privkey is invalid.\n");
+		goto func_end;
+	}
+	ret = 0;
+func_end:
+	if (ret != 0) {
+		if (ssl_ctx != NULL) {
+			SSL_CTX_free(ssl_ctx);
+			ssl_ctx = NULL;
+		}
+	}
+	return ssl_ctx;
+}
+#endif
 #include <event2/event_struct.h>
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
@@ -145,6 +213,9 @@ typedef void (* OnError)(void *backendio, void *userdata);
 typedef struct Backend {
 	struct evconnlistener *listener;
 	OnAccept on_accept;
+#ifdef WITH_SSL
+	SSL_CTX *ssl_ctx;
+#endif
 	void *userdata;
 } Backend;
 
@@ -156,6 +227,9 @@ typedef struct BackendIo {
 	OnWrite on_write;
 	OnClose on_close;
 	OnError on_error;
+#ifdef WITH_SSL
+	SSL *ssl;
+#endif
 	void *userdata;
 } BackendIo;
 
@@ -209,7 +283,7 @@ static void backendio_on_read(struct bufferevent *bev, void *userdata) {
 	BackendIo *backendio = NULL;
     struct evbuffer *input = NULL;
     size_t read_len = 0;
-    unsigned char *buf = NULL;
+    uint8_t *buf = NULL;
 
 	backendio = (BackendIo *)userdata;
 	if (backendio == NULL) {
@@ -220,9 +294,13 @@ static void backendio_on_read(struct bufferevent *bev, void *userdata) {
         goto func_end;
     }
     read_len = evbuffer_get_length(input);
-    buf = (unsigned char *)malloc(read_len);
+    buf = (uint8_t *)malloc(read_len);
+	if (buf == NULL) {
+        goto func_end;
+	}
     bufferevent_read(bev, buf, read_len);
-    debug_printf("backend on_read: %ld\n", read_len);
+    // debug_printf("backend on_read: %ld\n", read_len);
+	// hexdump(buf, read_len);
 	if (backendio->on_read) {
 		backendio->on_read(backendio, backendio->userdata, buf, read_len);
 	}
@@ -285,20 +363,31 @@ func_end:
 static void backend_on_accept(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *sa, int socklen, void *userdata) {
 	Backend *backend = NULL;
 	BackendIo *backendio = NULL;
-	char ip[48];
+	char ip[48] = {0};
 	int tcp_nodelay = 1;
 
 	backend = (Backend *)userdata;
 	if (backend == NULL) {
-        emergency_printf("%s %d, NULL ptr.\n", __FILE__, __LINE__);
 		goto func_end;
 	}
 	backendio = (BackendIo *)malloc(sizeof(BackendIo));
 	memset(backendio, 0x00, sizeof(BackendIo));
 
-    backendio->io = bufferevent_socket_new(g_event_base, fd, BEV_OPT_CLOSE_ON_FREE);
+#ifdef WITH_SSL
+	if (backend->ssl_ctx != NULL) {
+		backendio->ssl = SSL_new(backend->ssl_ctx);
+		if (backendio->ssl == NULL) {
+			emergency_printf("SSL_new failed.\n");
+			goto func_end;
+		}
+		backendio->io = bufferevent_openssl_socket_new(g_event_base, fd, backendio->ssl, BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE);
+	} else
+#endif
+	{
+		backendio->io = bufferevent_socket_new(g_event_base, fd, BEV_OPT_CLOSE_ON_FREE);
+	}
     if (backendio->io == NULL) {
-        error_printf("event_base_new failed.\n");
+        error_printf("bufferevent_socket_new failed.\n");
 		goto func_end;
     }
 	inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)sa)->sin6_addr), ip, sizeof(ip)); /* TODO IPv4/IPv6 */
@@ -329,6 +418,14 @@ static void *backend_create(int ip_version, unsigned short port, const char *crt
 	if (backend == NULL) {
 		goto func_end;
 	}
+	memset(backend, 0x00, sizeof(Backend));
+
+#ifdef WITH_SSL
+	if (crt_file != NULL) {
+		backend->ssl_ctx = backend_create_ssl_ctx(crt_file, key_file);
+	}
+#endif
+
 #ifdef WITH_IPV6
 	if (ip_version == 6) {
 		memset(&svr_addr6, 0x00, sizeof(svr_addr6));
@@ -428,33 +525,6 @@ func_end:
 }
 /* tcp/ssl backend end */
 
-static void hexdump(void *_buf, size_t size) {
-	unsigned char *buf = (unsigned char *)_buf;
-	size_t i = 0, offset = 0;
-	char tmp = '\0';
-	for (offset = 0; offset < size; offset += 16) {
-		printf("%08x: ", (unsigned int)offset);
-		for (i = 0; i < 16; i++) {
-			if (offset + i < size) {
-				printf("%02x ", *(buf + offset + i));
-			} else {
-				printf("   ");
-			}
-		}
-		printf("  ");
-		for (i = 0; i < 16; i++) {
-			if (offset + i < size) {
-				tmp = *(buf + offset + i);
-				if (tmp < ' ' || tmp > '~') {
-					printf(".");
-				} else {
-					printf("%c", tmp);
-				}
-			}
-		}
-		printf("\n");
-	}
-}
 /*
 ../aaa => /aaa
 /../aaa => /aaa
@@ -2128,7 +2198,8 @@ int ws_pack(HTTP_FD *p_link, unsigned char opcode) {
 		p_link->ws_response.content[0] = '\0';
 	}
 	p_link->ws_response.used = 0;
-	apply_change(p_link);
+	p_link->sending_len = p_link->ws_sendq.used;
+	// apply_change(p_link);
 	return 0;
 }
 static int upgrade_websocket(HTTP_FD *p_link) {
@@ -2269,6 +2340,7 @@ static void web_on_write(void *_backend, void *userdata, size_t size) {
 	}
 #ifdef WITH_WEBSOCKET
 	else if (p_link->state == STATE_WS_CONNECTED) {
+		printf("tqwdbg, ws sended: %zu / %zu\n", size, p_link->ws_sendq.used);
 		p_link->ws_sendq.used -= size;
 		memmove(p_link->ws_sendq.content, p_link->ws_sendq.content + size, p_link->ws_sendq.used + 1);
 		if (p_link->ws_sendq.used > 0) {
@@ -2563,13 +2635,6 @@ static WEB_SERVER *create_server(const char *name, int ip_version, unsigned shor
 	if (name != NULL) {
 		new_server->name = strdup(name);;
 	}
-#ifdef WITH_SSL
-	if (crt_file != NULL) {
-		new_server->is_ssl = 1;
-	} else {
-		new_server->is_ssl = 0;
-	}
-#endif
 	new_server->backend = backend_create(ip_version, port, crt_file, key_file, on_accept, new_server);
 	if (new_server->backend == NULL) {
 		emergency_printf("IPv%d: bind port %u failed.\n", ip_version, port);
@@ -2617,16 +2682,13 @@ int web_server_run() {
 #define WEB_ROOT "./static"
 #ifdef WITH_IPV6
 	create_http("default", 6, 20080, WEB_ROOT);
-#else
-	create_http("default", 4, 20080, WEB_ROOT);
 #endif
+	create_http("default", 4, 20080, WEB_ROOT);
 #ifdef WITH_SSL
 #ifdef WITH_IPV6
-	create_https("default", 6, 20443, WEB_ROOT, "cert/server.crt", "cert/server.key");
-#else
-	create_https("default", 4, 20080, WEB_ROOT, "cert/server.crt", "cert/server.key");
+	create_https("default", 6, 20443, WEB_ROOT, "server.crt", "server.key");
 #endif
-	// create_https("default", 4, 20443, WEB_ROOT, "cert/server.crt", "cert/server.key");
+	create_https("default", 4, 20443, WEB_ROOT, "server.crt", "server.key");
 #endif /* WITH_SSL */
 	backend_loop_run();
 	return 0;

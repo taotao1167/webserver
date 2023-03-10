@@ -42,7 +42,7 @@ set(CMAKE_C_FLAGS "-g3 -Wall -pthread")
 
 add_library(webserver STATIC ${SRCLIST})
 target_include_directories(webserver PUBLIC ${LIBHV_INCLUDE_PATH})
-target_link_libraries(webserver PUBLIC event)
+target_link_libraries(webserver PUBLIC event event_openssl)
 
 link_directories(${LIBRARY_OUTPUT_PATH})
 add_executable(app main.c)
