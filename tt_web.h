@@ -110,7 +110,7 @@ typedef struct ST_HTTP_FD {
 	TT_BUFFER ws_data; /* decoded data from websocket */
 	TT_BUFFER ws_response; /* raw data that not packed to send by websocket */
 #endif
-	unsigned int sending_len; /* indicate the length header, entity or ws_sendq is sending, 0 means socket is idle. */
+	size_t sending_len; /* indicate the length header, entity or ws_sendq is sending, 0 means socket is idle. */
 	int (* send_cb)(struct ST_HTTP_FD *p_link);
 	struct ST_WEB_SERVER *server;
 	struct ST_HTTP_SESSION *session;

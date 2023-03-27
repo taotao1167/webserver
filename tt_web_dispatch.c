@@ -136,9 +136,12 @@ int http_test_upload(HTTP_FD *p_link) {
 			if (p_upfile->fname[0] != '\0') {
 				web_printf(p_link, "\"file1\":{\"fname\":\"%s\", \"ftype\":\"%s\", \"fsize\":%u},",
 					p_upfile->fname, p_upfile->ftype, p_upfile->fsize);
-				// fp = fopen(p_upfile->fname, "wb");
-				// fwrite(p_upfile->fcontent, p_upfile->fsize, 1, fp);
-				// fclose(fp);
+#if 0
+				FILE *fp = NULL;
+				fp = fopen(p_upfile->fname, "wb");
+				fwrite(p_upfile->fcontent, p_upfile->fsize, 1, fp);
+				fclose(fp);
+#endif
 			} else {
 				web_printf(p_link, "\"file1\":{\"fname\":\"\", \"ftype\":\"\", \"fsize\":0},");
 			}
@@ -156,9 +159,12 @@ int http_test_upload(HTTP_FD *p_link) {
 			if (p_cur_upfile->fname[0] != '\0') {
 				web_printf(p_link, "{\"fname\":\"%s\", \"ftype\":\"%s\", \"fsize\":%u}",
 					p_cur_upfile->fname, p_cur_upfile->ftype, p_cur_upfile->fsize);
-				// fp = fopen(p_cur_upfile->fname, "wb");
-				// fwrite(p_cur_upfile->fcontent, p_cur_upfile->fsize, 1, fp);
-				// fclose(fp);
+#if 1
+				FILE *fp = NULL;
+				fp = fopen(p_cur_upfile->fname, "wb");
+				fwrite(p_cur_upfile->fcontent, p_cur_upfile->fsize, 1, fp);
+				fclose(fp);
+#endif
 			}
 		}
 		web_file_list_free(&p_upfile_list);
@@ -416,6 +422,13 @@ int http_link_list(HTTP_FD *p_link) {
 			);
 	}
 	web_printf(p_link, "]}");
+	web_fin(p_link, 200);
+	return 0;
+}
+int http_streamingconfig(HTTP_FD *p_link) {
+	web_printf(p_link, "{\"global_configs\": {\"aec\": 0, \"audio_healthy_threshold\": 1000, \"auto_start_push_play\": 1, \"bind_rules\": \"ALL=1;eth0:0=0;eth0:1=0;eth0:2=0;eth0:3=0;eth0:4=0;\", \"compatible_checked\": 1, \"demux_verbose_log\": 128006, \"dump_yuv\": 0, \"ec_param_set\": 2, \"enable_video_preview\": 0, \"hb_interval\": 1000, \"pbr_ratio\": 1000, \"pce_data_port\": 5051, \"pce_port\": 5050, \"psl_verbose_log\": 128006, \"ptcp_log\": 128006, \"pzvt_refresh_interval\": 60000, \"systemtime_changed_action\": 1, \"systemtime_changed_backward\": -15, \"systemtime_changed_forward\": 360000, \"vbv_ratio\": 1000, \"video_healthy_threshold\": 1000, \"ptcp_logsize\": 16024, \"psl_logsize\": 8016, \"demux_logsize\": 8016}, \"streaming_configs\": [{\"audio_capture_param\": {\"audio_channel_num\": 1, \"audio_sample_rate\": 48000, \"data_source\": 2000, \"impl\": 4}, \"video_capture_param\": {\"data_source\": 1000, \"device\": \"/dev/video0\", \"device_index\": 0, \"extern_param\": {\"name\": \"AndroidScreenCapturer\"}, \"format\": 2, \"fps\": 25, \"impl\": 12, \"library\": \"\", \"width\": 1920, \"height\": 1080}, \"streaming_param\": {\"delay_ms\": 3000, \"fps_report_interval\": 1000, \"audio_enc_param\": [{\"sample_rate\": 48000, \"channel_num\": 1, \"format\": 14, \"bitrate\": 64000, \"data_source\": 2000}], \"video_enc_param\": [{\"format\": 1, \"width\": 960, \"height\": 540, \"bitrate\": 1500, \"fps\": 25, \"key_interval_sec\": 2.0, \"enc_profile\": 2, \"adjust_br_min_ratio\": 25, \"adjust_br_max_ratio\": 110, \"adjust_fps_min_ratio\": 32, \"enc_bitrate_mode\": 2, \"enc_input_yuv_format\": 1, \"data_source\": 1000, \"codec_name\": \"\"}], \"enable_push\": 1, \"group\": \"testband\", \"profile\": \"PROFILE_0\", \"url\": \"http://172.16.0.100:7788/publish/trans/testband/<mlinkx>/<rid>?pdp=0&ndselect=704&arrc=2&quality=60&delay=300&linkdelay=500&livedelay=1000&linkmode=8&txmd=2&lpc=1&crs=1&ctrlmsg=1\"}, \"audio_enc_variant\": 1, \"group\": \"testband\", \"profile\": \"PROFILE_0\", \"working_mode\": 1}], \"enable_ebur\": 0, \"ec_param\": \"ec_agc1=1&ec_agc2=1&ec_agc=1&ec_da_suppression_bottom_line1=2000&ec_da_suppression_bottom_line2=2000&ec_da_suppression_bottom_line=2000&ec_fea_suppression1=1&ec_fea_suppression2=0&ec_fea_suppression=0&ec_fea_suppression_bottom_line1=400&ec_fea_suppression_bottom_line2=400&ec_fea_suppression_bottom_line=400&ec_fmp_hold_duration1=20&ec_fmp_hold_duration2=20&ec_fmp_hold_duration=20&ec_fmp_low_power_exit_threshold1=1000&ec_fmp_low_power_exit_threshold2=1000&ec_fmp_low_power_exit_threshold=1000&ec_fmp_low_power_threshold1=160&ec_fmp_low_power_threshold2=160&ec_fmp_low_power_threshold=160&ec_fmp_ne_low_power1=1&ec_fmp_ne_low_power2=0&ec_fmp_ne_low_power=0&ec_fmp_ne_non_activity1=0&ec_fmp_ne_non_activity2=0&ec_fmp_ne_non_activity=0&ec_fmp_ramp_duration1=10&ec_fmp_ramp_duration2=10&ec_fmp_ramp_duration=10&ec_fmp_ramp_exit_duration1=5&ec_fmp_ramp_exit_duration2=5&ec_fmp_ramp_exit_duration=5&ec_fmp_trigger_threshold1=50&ec_fmp_trigger_threshold2=50&ec_fmp_trigger_threshold=50&ec_force_farend_activity1=0&ec_force_farend_activity2=0&ec_force_farend_activity=0&ec_mobile1=0&ec_mobile2=0&ec_mobile=1&ec_nea_only_linear1=0&ec_nea_only_linear2=1&ec_nea_only_linear=0&ec_nea_update_linear_param1=1&ec_nea_update_linear_param2=1&ec_nea_update_linear_param=1&ec_ned_enr_exit_threshold1=400000&ec_ned_enr_exit_threshold2=1000000&ec_ned_enr_exit_threshold=100000&ec_ned_enr_threshold1=2000&ec_ned_enr_threshold2=9000&ec_ned_enr_threshold=2500&ec_ned_hold_duration1=50&ec_ned_hold_duration2=80&ec_ned_hold_duration=50&ec_ned_trigger_threshold1=20&ec_ned_trigger_threshold2=6&ec_ned_trigger_threshold=12&ec_nes_ban_comfort_noise1=1&ec_nes_ban_comfort_noise2=0&ec_nes_ban_comfort_noise=0&ec_ns1=1&ec_ns2=1&ec_ns=1&ec_turn_down_render1=7000&ec_turn_down_render2=7000&ec_turn_down_render=10000&ec_use_hw1=1&ec_use_hw2=0&ec_use_hw=1&ec_use_last_delay1=1&ec_use_last_delay2=1&ec_use_last_delay=0&mode1=1&mode2=1&mode=1&ns_force_sr1=0&ns_force_sr2=0&ns_force_sr=0&ns_level1=2&ns_level2=2&ns_level=2\"}");
+	web_set_header(p_link, "Content-Type", "application/json");
+	web_set_header(p_link, "Access-Control-Allow-Origin", "*");
 	web_fin(p_link, 200);
 	return 0;
 }
@@ -697,6 +710,7 @@ static int send_file(HTTP_FD *p_link) { /* not thread safe, because variable "co
 #else
 	fseek(fp, send_info->offset, SEEK_SET);
 #endif
+	// printf("fread, offset:%zu size:%zu\n", send_info->offset, read_len);
 	fread(content, read_len, 1, fp);
 	send_info->offset += read_len;
 	web_write(p_link, content, read_len);
@@ -1110,6 +1124,7 @@ void tt_handler_register() {
 	tt_handler_add("/cgi/svrList.json", http_svr_list);
 	tt_handler_add("/cgi/sessionList.json", http_session_list);
 	tt_handler_add("/cgi/linkList.json", http_link_list);
+	tt_handler_add("/rooms/memberships/streaming_config/", http_streamingconfig);
 #ifdef WITH_SSL
 	tt_handler_add("/sslCtxCfg.html", http_ssl_ctx_cfg);
 	tt_handler_add("/cgi/sslCtxCfg", http_cgi_ssl_ctx_cfg);
@@ -1188,7 +1203,7 @@ int req_dispatch(HTTP_FD *p_link) {
 	} else {
 		http_callback_default(p_link);
 	}
-	if (p_link->state != STATE_SUSPEND && p_link->response_head.used == 0) {
+	if (p_link->state != STATE_SUSPEND && p_link->sending_len == 0) {
 		printf("return without call \"web_fin\" @ \"%s\"!\n", p_link->path);
 		web_fin(p_link, 200);
 	}

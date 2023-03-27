@@ -253,8 +253,8 @@ static void backend_loop_create(void *userdata, OnTimer on_timer) {
 	g_on_timer = on_timer;
 	event_assign(&time_ev, g_event_base, -1, EV_PERSIST, backend_on_timer, userdata);
 	evutil_timerclear(&tv);
-	tv.tv_sec = 0;
-	tv.tv_usec = 1000;
+	tv.tv_sec = 1;
+	tv.tv_usec = 0;
 	event_add(&time_ev, &tv);
 func_end:
 	return;
@@ -1356,14 +1356,14 @@ static int parse_http(HTTP_FD *p_link, E_HTTP_JUDGE *judge_result, int *http_cod
 	}
 
 	/* parse entity if entity not null, save information to p_link->post_data and p_link->file_data */
-	if (p_entity[0] != '\0') {
+	p_contype = (char *)web_header_str(p_link, "Content-Type", "");
+	if (p_contype[0] && (0 == strcmp(p_contype, "application/x-www-form-urlencoded") || 0 == strncmp("multipart/form-data", p_contype, 19)) && p_entity[0] != '\0') {
 		if (0 == p_link->content_len) {
 			notice_printf("no content.\n");
 			*http_code = 411;
 			goto func_end;
 		}
 		debug_printf("ready for parse entity\n");
-		p_contype = (char *)web_header_str(p_link, "Content-Type", "");
 		/* strlen("multipart/form-data; boundary=") == 30 */
 		if (0 == strncmp("multipart/form-data; boundary=", p_contype, 30)) {
 			p_boundary = p_contype + 30;
@@ -1720,165 +1720,7 @@ const char *get_mime_type(const char *p_path) {
 	}
 	return "application/octet-stream";
 }
-int web_fin(HTTP_FD *p_link, int http_code) {
-	int ret = -1, i = 0;
-	HTTP_KVPAIR *p_cur = NULL;
-	const char *status_text = "(unknown)", *p_value = NULL;
-	static HTTP_CODE_MAP code_map[] = {
-			{100, "Continue", NULL},
-			{101, "Switching Protocols", NULL},
-			{200, "OK", NULL},
-			{201, "Created", NULL},
-			{202, "Accepted", NULL},
-			{203, "Non-Authoritative Information", NULL},
-			{204, "No Content", NULL},
-			{205, "Reset Content", NULL},
-			{206, "Partial Content", NULL},
-			{300, "Multiple Choices", NULL},
-			{301, "Moved Permanently", NULL},
-			{302, "Found", NULL},
-			{303, "See Other", NULL},
-			{304, "Not Modified", NULL},
-			{305, "Use Proxy", NULL},
-			{306, "(Unused)", NULL},
-			{307, "Temporary Redirect", NULL},
-			{400, "Bad Request", NULL},
-			{401, "Unauthorized", NULL},
-			{402, "Payment Required", NULL},
-			{403, "Forbidden", "<html><h1>403 Forbidden</h1></html>"},
-			{404, "Not Found", "<html><h1>404 Not Found</h1></html>"},
-			{405, "Method Not Allowed", "<html><h1>405 Method Not Allowed</h1></html>"},
-			{406, "Not Acceptable", NULL},
-			{407, "Proxy Authentication Required", NULL},
-			{408, "Request Timeout", "<html><h1>408 Request Timeout</h1></html>"},
-			{409, "Conflict", NULL},
-			{410, "Gone", NULL},
-			{411, "Length Required", NULL},
-			{412, "Precondition Failed", NULL},
-			{413, "Request entity Too Large", "<html><h1>413 Request entity Too Large</h1></html>"},
-			{414, "Request-URI Too Long", "<html><h1>414 Request-URI Too Long</h1></html>"},
-			{415, "Unsupported Media Type", NULL},
-			{416, "Requested Range Not Satisfiable", NULL},
-			{417, "Expectation Failed", NULL},
-			{500, "Internal Server Error", NULL},
-			{501, "Not Implemented", NULL},
-			{502, "Bad Gateway", "<html><h1>502 Bad Gateway</h1></html>"},
-			{503, "Service Unavailable", NULL},
-			{504, "Gateway Timeout", NULL},
-			{505, "HTTP Version Not Supported", NULL},
-			{-1, NULL, NULL}
-		};
 
-	static const char *hfields[][2] = {
-			{"Server", "unknown"},
-			{"Accept-Ranges", "bytes"},
-			{"Date", NULL},
-			{"WWW-Authenticate", NULL},
-			{"Location", NULL},
-			{"Set-Cookie", NULL},
-			{"Pragma", "no-cache"},
-			{"Cache-Control", "no-store"},
-			{"Content-Encoding", NULL},
-			{"Content-Length", NULL},
-			{"Content-Range", NULL},
-			{"Content-Type", "text/html"},
-			{"Content-Disposition", NULL},
-			{"Etag", NULL},
-			{"Last-Modified", NULL},
-			{"Connection","Keep-Alive"},
-			{"Cross-Origin-Opener-Policy","same-origin"},
-			{"Cross-Origin-Embedder-Policy","require-corp"},
-			{NULL, NULL}
-		};
-	if (http_code != 101 && http_code != 200 && http_code != 206 && http_code != 302 && http_code != 304 && http_code != 404) {
-		printf("---------------------\n");
-		printf("response code %d\n", http_code);
-		hexdump(p_link->recvbuf, p_link->recvbuf_len);
-	}
-	if (p_link->response_head.used) {
-		if (p_link->path == NULL) {
-			printf("duplicate call \"web_fin\" @ \"(null)\"!\n");
-		} else {
-			printf("duplicate call \"web_fin\" @ \"%s\"!\n", p_link->path);
-		}
-		goto func_end;
-	}
-	if (http_code == 500) {
-		tt_buffer_no_copy(&(p_link->response_head), (unsigned char *)g_err_500_head, strlen(g_err_500_head), 0, 0);
-		tt_buffer_no_copy(&(p_link->response_entity), (unsigned char *)g_err_500_entity, strlen(g_err_500_entity), 0, 0);
-	} else {
-		/* find status by response code, auto generate entity if method is not HEAD and entify is undefined by user but found in code_map */
-		for (i = 0; code_map[i].code != -1; i++) {
-			if (http_code != code_map[i].code) {
-				continue;
-			}
-			status_text = code_map[i].status_text;
-			if (p_link->response_entity.used == 0 && code_map[i].entity != NULL) {
-				web_no_copy(p_link, (unsigned char *)code_map[i].entity, strlen((const char *)code_map[i].entity), 0, 0);
-			}
-			break;
-		}
-		/* generate http version, response code and status */
-		tt_buffer_printf(&(p_link->response_head), "HTTP/1.1 %d %s\r\n", http_code, status_text);
-		for (i = 0; hfields[i][0] != NULL; i++) {
-			p_value = web_cnf_header_str(p_link, hfields[i][0], "");
-			if (p_value == NULL) { /* NULL means need remove */
-				web_unset_header(p_link, hfields[i][0]);
-				continue;
-			} else if (p_value[0] == '\0') { /* "" means not modified by user */
-				if (0 == strcasecmp(hfields[i][0], "Content-Length")) {
-					tt_buffer_printf(&(p_link->response_head), "Content-Length: %" PRId64 "\r\n", p_link->response_entity.used);
-				} else if (0 == strcasecmp(hfields[i][0], "Content-Type")) {
-					if (p_link->path == NULL || (http_code != 200 &&  http_code != 206)) {
-						tt_buffer_printf(&(p_link->response_head), "Content-Type: text/html\r\n");
-					} else {
-						tt_buffer_printf(&(p_link->response_head), "Content-Type: %s\r\n", get_mime_type(p_link->path));
-					}
-				} else if (0 == strcasecmp(hfields[i][0], "Server")) {
-					tt_buffer_printf(&(p_link->response_head), "Server: %s\r\n", g_hostname);
-				} else if (0 == strcasecmp(hfields[i][0], "Connection")) {
-					if (p_link->state == STATE_CLOSING) {
-						tt_buffer_printf(&(p_link->response_head), "Connection: close\r\n");
-					} else {
-						tt_buffer_printf(&(p_link->response_head), "Connection: %s\r\n", hfields[i][1]);
-					}
-				} else {
-					if (hfields[i][1]) {
-						tt_buffer_printf(&(p_link->response_head), "%s: %s\r\n", hfields[i][0], hfields[i][1]);
-					}
-				}
-			} else {
-				tt_buffer_printf(&(p_link->response_head), "%s: %s\r\n", hfields[i][0], p_value);
-				web_unset_header(p_link, hfields[i][0]);
-			}
-		}
-		for (p_cur = p_link->cnf_header; p_cur != NULL; p_cur = p_cur->next) {
-			tt_buffer_printf(&(p_link->response_head), "%s: %s\r\n", p_cur->key, p_cur->value);
-		}
-		tt_buffer_printf(&(p_link->response_head), "\r\n");
-	}
-	/* remove entity if method is HEAD */
-	if (p_link->method != NULL && 0 == strcmp(p_link->method, "HEAD")) {
-		p_link->response_entity.used = 0;
-	}
-	if (p_link->state != STATE_CLOSED) { /* should not active again after closed */
-		p_link->state = STATE_SENDING;
-	}
-	p_link->send_state = SENDING_HEAD;
-	p_link->sending_len = p_link->response_head.used;
-	ret = 0;
-func_end:
-	return ret;
-}
-
-/* response server is busy */
-int web_busy_response(HTTP_FD *p_link) {
-	web_printf(p_link, "<h1>Server is too busy!</h1>");
-	web_set_header(p_link, "Retry-After", "5");
-	p_link->state = STATE_CLOSING;
-	web_fin(p_link, 503);
-	return 0;
-}
 static int reset_link_for_continue(HTTP_FD *p_link) {
 	p_link->recvbuf_len = 0;
 	p_link->content_len = 0;
@@ -1969,27 +1811,31 @@ static void apply_change(HTTP_FD *p_link) {
 	}
 	if (p_link->state == STATE_RECVING) {
 		backendio_enable_read(p_link->backendio, 1);
-	} else if (p_link->state == STATE_SENDING || p_link->state == STATE_CLOSING) {
+	} else if (p_link->state == STATE_SENDING || p_link->state == STATE_CLOSING
+#ifdef WITH_WEBSOCKET
+		|| p_link->state == STATE_WS_HANDSHAKE
+#endif
+	) {
 
-		if (p_link->sending_len != 0) {
-			if (p_link->send_state == SENDING_HEAD) {
-				backendio_write(p_link->backendio, p_link->response_head.content, p_link->sending_len);
-			} else {
-				backendio_write(p_link->backendio, p_link->response_entity.content, p_link->sending_len);
+		if (p_link->send_state == SENDING_HEAD) {
+			if (p_link->response_head.used > 0) {
+				p_link->sending_len = p_link->response_head.used;
+				backendio_write(p_link->backendio, p_link->response_head.content, p_link->response_head.used);
+				p_link->response_head.used = 0;
+			}
+		} else { /* p_link->send_state == SENDING_ENTITY */
+			if (p_link->response_entity.used > 0) {
+				p_link->sending_len = p_link->response_entity.used;
+				backendio_write(p_link->backendio, p_link->response_entity.content, p_link->response_entity.used);
+				p_link->response_entity.used = 0;
 			}
 		}
 #ifdef WITH_WEBSOCKET
-	} else if (p_link->state == STATE_WS_HANDSHAKE) {
-		if (p_link->sending_len != 0) {
-			if (p_link->send_state == SENDING_HEAD) {
-				backendio_write(p_link->backendio, p_link->response_head.content, p_link->sending_len);
-			} else {
-				backendio_write(p_link->backendio, p_link->response_entity.content, p_link->sending_len);
-			}
-		}
 	} else if (p_link->state == STATE_WS_CONNECTED) {
-		if (p_link->sending_len != 0) {
+		if (p_link->ws_sendq.used > 0) {
+			p_link->sending_len = p_link->ws_sendq.used;
 			backendio_write(p_link->backendio, p_link->ws_sendq.content, p_link->ws_sendq.used);
+			p_link->ws_sendq.used = 0;
 		}
 #endif
 	} else {
@@ -1998,6 +1844,169 @@ static void apply_change(HTTP_FD *p_link) {
 func_end:
 	return;
 }
+
+int web_fin(HTTP_FD *p_link, int http_code) {
+	int ret = -1, i = 0;
+	HTTP_KVPAIR *p_cur = NULL;
+	const char *status_text = "(unknown)", *p_value = NULL;
+	static HTTP_CODE_MAP code_map[] = {
+			{100, "Continue", NULL},
+			{101, "Switching Protocols", NULL},
+			{200, "OK", NULL},
+			{201, "Created", NULL},
+			{202, "Accepted", NULL},
+			{203, "Non-Authoritative Information", NULL},
+			{204, "No Content", NULL},
+			{205, "Reset Content", NULL},
+			{206, "Partial Content", NULL},
+			{300, "Multiple Choices", NULL},
+			{301, "Moved Permanently", NULL},
+			{302, "Found", NULL},
+			{303, "See Other", NULL},
+			{304, "Not Modified", NULL},
+			{305, "Use Proxy", NULL},
+			{306, "(Unused)", NULL},
+			{307, "Temporary Redirect", NULL},
+			{400, "Bad Request", NULL},
+			{401, "Unauthorized", NULL},
+			{402, "Payment Required", NULL},
+			{403, "Forbidden", "<html><h1>403 Forbidden</h1></html>"},
+			{404, "Not Found", "<html><h1>404 Not Found</h1></html>"},
+			{405, "Method Not Allowed", "<html><h1>405 Method Not Allowed</h1></html>"},
+			{406, "Not Acceptable", NULL},
+			{407, "Proxy Authentication Required", NULL},
+			{408, "Request Timeout", "<html><h1>408 Request Timeout</h1></html>"},
+			{409, "Conflict", NULL},
+			{410, "Gone", NULL},
+			{411, "Length Required", NULL},
+			{412, "Precondition Failed", NULL},
+			{413, "Request entity Too Large", "<html><h1>413 Request entity Too Large</h1></html>"},
+			{414, "Request-URI Too Long", "<html><h1>414 Request-URI Too Long</h1></html>"},
+			{415, "Unsupported Media Type", NULL},
+			{416, "Requested Range Not Satisfiable", NULL},
+			{417, "Expectation Failed", NULL},
+			{500, "Internal Server Error", NULL},
+			{501, "Not Implemented", NULL},
+			{502, "Bad Gateway", "<html><h1>502 Bad Gateway</h1></html>"},
+			{503, "Service Unavailable", NULL},
+			{504, "Gateway Timeout", NULL},
+			{505, "HTTP Version Not Supported", NULL},
+			{-1, NULL, NULL}
+		};
+
+	static const char *hfields[][2] = {
+			{"Server", "unknown"},
+			{"Accept-Ranges", "bytes"},
+			{"Date", NULL},
+			{"WWW-Authenticate", NULL},
+			{"Location", NULL},
+			{"Set-Cookie", NULL},
+			{"Pragma", "no-cache"},
+			{"Cache-Control", "no-store"},
+			{"Content-Encoding", NULL},
+			{"Content-Length", NULL},
+			{"Content-Range", NULL},
+			{"Content-Type", "text/html"},
+			{"Content-Disposition", NULL},
+			{"Etag", NULL},
+			{"Last-Modified", NULL},
+			{"Connection","Keep-Alive"},
+/*
+			{"Cross-Origin-Opener-Policy","same-origin"},
+			{"Cross-Origin-Embedder-Policy","require-corp"},
+*/
+			{NULL, NULL}
+		};
+	if (http_code != 101 && http_code != 200 && http_code != 206 && http_code != 302 && http_code != 304 && http_code != 404) {
+		printf("---------------------\n");
+		printf("response code %d\n", http_code);
+		hexdump(p_link->recvbuf, p_link->recvbuf_len);
+	}
+	if (p_link->response_head.used) {
+		if (p_link->path == NULL) {
+			printf("duplicate call \"web_fin\" @ \"(null)\"!\n");
+		} else {
+			printf("duplicate call \"web_fin\" @ \"%s\"!\n", p_link->path);
+		}
+		goto func_end;
+	}
+	if (http_code == 500) {
+		tt_buffer_no_copy(&(p_link->response_head), (unsigned char *)g_err_500_head, strlen(g_err_500_head), 0, 0);
+		tt_buffer_no_copy(&(p_link->response_entity), (unsigned char *)g_err_500_entity, strlen(g_err_500_entity), 0, 0);
+	} else {
+		/* find status by response code, auto generate entity if method is not HEAD and entify is undefined by user but found in code_map */
+		for (i = 0; code_map[i].code != -1; i++) {
+			if (http_code != code_map[i].code) {
+				continue;
+			}
+			status_text = code_map[i].status_text;
+			if (p_link->response_entity.used == 0 && code_map[i].entity != NULL) {
+				web_no_copy(p_link, (unsigned char *)code_map[i].entity, strlen((const char *)code_map[i].entity), 0, 0);
+			}
+			break;
+		}
+		/* generate http version, response code and status */
+		tt_buffer_printf(&(p_link->response_head), "HTTP/1.1 %d %s\r\n", http_code, status_text);
+		for (i = 0; hfields[i][0] != NULL; i++) {
+			p_value = web_cnf_header_str(p_link, hfields[i][0], "");
+			if (p_value == NULL) { /* NULL means need remove */
+				web_unset_header(p_link, hfields[i][0]);
+				continue;
+			} else if (p_value[0] == '\0') { /* "" means not modified by user */
+				if (0 == strcasecmp(hfields[i][0], "Content-Length")) {
+					tt_buffer_printf(&(p_link->response_head), "Content-Length: %" PRId64 "\r\n", p_link->response_entity.used);
+				} else if (0 == strcasecmp(hfields[i][0], "Content-Type")) {
+					if (p_link->path == NULL || (http_code != 200 &&  http_code != 206)) {
+						tt_buffer_printf(&(p_link->response_head), "Content-Type: text/html\r\n");
+					} else {
+						tt_buffer_printf(&(p_link->response_head), "Content-Type: %s\r\n", get_mime_type(p_link->path));
+					}
+				} else if (0 == strcasecmp(hfields[i][0], "Server")) {
+					tt_buffer_printf(&(p_link->response_head), "Server: %s\r\n", g_hostname);
+				} else if (0 == strcasecmp(hfields[i][0], "Connection")) {
+					if (p_link->state == STATE_CLOSING) {
+						tt_buffer_printf(&(p_link->response_head), "Connection: close\r\n");
+					} else {
+						tt_buffer_printf(&(p_link->response_head), "Connection: %s\r\n", hfields[i][1]);
+					}
+				} else {
+					if (hfields[i][1]) {
+						tt_buffer_printf(&(p_link->response_head), "%s: %s\r\n", hfields[i][0], hfields[i][1]);
+					}
+				}
+			} else {
+				tt_buffer_printf(&(p_link->response_head), "%s: %s\r\n", hfields[i][0], p_value);
+				web_unset_header(p_link, hfields[i][0]);
+			}
+		}
+		for (p_cur = p_link->cnf_header; p_cur != NULL; p_cur = p_cur->next) {
+			tt_buffer_printf(&(p_link->response_head), "%s: %s\r\n", p_cur->key, p_cur->value);
+		}
+		tt_buffer_printf(&(p_link->response_head), "\r\n");
+	}
+	/* remove entity if method is HEAD */
+	if (p_link->method != NULL && 0 == strcmp(p_link->method, "HEAD")) {
+		p_link->response_entity.used = 0;
+	}
+	if (p_link->state != STATE_CLOSED) { /* should not active again after closed */
+		p_link->state = STATE_SENDING;
+	}
+	p_link->send_state = SENDING_HEAD;
+	apply_change(p_link);
+	ret = 0;
+func_end:
+	return ret;
+}
+
+/* response server is busy */
+int web_busy_response(HTTP_FD *p_link) {
+	web_printf(p_link, "<h1>Server is too busy!</h1>");
+	web_set_header(p_link, "Retry-After", "5");
+	p_link->state = STATE_CLOSING;
+	web_fin(p_link, 503);
+	return 0;
+}
+
 static void http_read(HTTP_FD *p_link, const uint8_t *content, size_t size) {
 	int http_code = 500;	
 	E_HTTP_JUDGE judge_result = JUDGE_ERROR;
@@ -2198,8 +2207,7 @@ int ws_pack(HTTP_FD *p_link, unsigned char opcode) {
 		p_link->ws_response.content[0] = '\0';
 	}
 	p_link->ws_response.used = 0;
-	p_link->sending_len = p_link->ws_sendq.used;
-	// apply_change(p_link);
+	apply_change(p_link);
 	return 0;
 }
 static int upgrade_websocket(HTTP_FD *p_link) {
@@ -2308,7 +2316,9 @@ static void web_on_write(void *_backend, void *userdata, size_t size) {
 	HTTP_FD *p_link = (HTTP_FD *)userdata;
 
 	p_link->tm_last_active = time(0);
+	debug_printf("web_on_write, sended: %zu/%zu\n", size, p_link->sending_len);
 	if (size > p_link->sending_len) {
+		goto func_end;
 	} else {
 		p_link->sending_len -= size;
 		if (p_link->sending_len != 0) { /* ignore waiting send */
@@ -2316,13 +2326,14 @@ static void web_on_write(void *_backend, void *userdata, size_t size) {
 		} else {
 		}
 	}
+
+	/* p_link->sending_len == 0 */
 	if (p_link->state == STATE_SENDING || p_link->state == STATE_CLOSING
 #ifdef WITH_WEBSOCKET
 		 || p_link->state == STATE_WS_HANDSHAKE
 #endif
 			) {
 		if (p_link->send_state == SENDING_HEAD && p_link->response_entity.used != 0) {
-			p_link->sending_len = p_link->response_entity.used; /* set by web_on_write / reset_link / web_fin */
 			p_link->send_state = SENDING_ENTITY;
 		} else {
 			if (p_link->send_cb != NULL) {
@@ -2340,12 +2351,7 @@ static void web_on_write(void *_backend, void *userdata, size_t size) {
 	}
 #ifdef WITH_WEBSOCKET
 	else if (p_link->state == STATE_WS_CONNECTED) {
-		printf("tqwdbg, ws sended: %zu / %zu\n", size, p_link->ws_sendq.used);
-		p_link->ws_sendq.used -= size;
-		memmove(p_link->ws_sendq.content, p_link->ws_sendq.content + size, p_link->ws_sendq.used + 1);
-		if (p_link->ws_sendq.used > 0) {
-			p_link->sending_len = p_link->ws_sendq.used;
-		}
+		; /* do nothing */
 	}
 #endif
 	apply_change(p_link);
@@ -2680,15 +2686,17 @@ int web_server_run() {
 	backend_loop_create(web_on_timer, NULL);
 
 #define WEB_ROOT "./static"
+#define SSL_CRT "/home/www/server.crt"
+#define SSL_KEY "/home/www/server.key"
 #ifdef WITH_IPV6
 	create_http("default", 6, 20080, WEB_ROOT);
 #endif
 	create_http("default", 4, 20080, WEB_ROOT);
 #ifdef WITH_SSL
 #ifdef WITH_IPV6
-	create_https("default", 6, 20443, WEB_ROOT, "server.crt", "server.key");
+	create_https("default", 6, 20443, WEB_ROOT, SSL_CRT, SSL_KEY);
 #endif
-	create_https("default", 4, 20443, WEB_ROOT, "server.crt", "server.key");
+	create_https("default", 4, 20443, WEB_ROOT, SSL_CRT, SSL_KEY);
 #endif /* WITH_SSL */
 	backend_loop_run();
 	return 0;
