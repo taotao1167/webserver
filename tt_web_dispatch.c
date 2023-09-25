@@ -394,9 +394,13 @@ int http_link_list(HTTP_FD *p_link) {
 		} else {
 			web_printf(p_link, ",");
 		}
-		web_printf(p_link, "{\"ip_version\":\"%s\",\"peer_addr\":\"[%s]:%u\",\"local_addr\":\"[%s]:%u\",", \
-			(p_curlink->server->ip_version == 6) ? "IPv6" : "IPv4", \
-			p_curlink->ip_peer, p_curlink->port_peer, p_curlink->ip_local, p_curlink->port_local);
+		if (p_curlink->server->ip_version == 6) {
+			web_printf(p_link, "{\"ip_version\":\"%s\",\"peer_addr\":\"[%s]:%u\",\"local_addr\":\"[%s]:%u%s\",", \
+					"IPv6", p_curlink->ip_peer, p_curlink->port_peer, p_curlink->ip_local, p_curlink->port_local, (p_curlink == p_link) ? "(this)" : "");
+		} else {
+			web_printf(p_link, "{\"ip_version\":\"%s\",\"peer_addr\":\"%s:%u\",\"local_addr\":\"%s:%u%s\",", \
+					"IPv4", p_curlink->ip_peer, p_curlink->port_peer, p_curlink->ip_local, p_curlink->port_local, (p_curlink == p_link) ? "(this)" : "");
+		}
 		web_printf(p_link, "\"state\":\"");
 		switch(p_curlink->state) {
 			case STATE_RECVING:
@@ -665,9 +669,11 @@ int http_call_system(HTTP_FD *p_link) {
 	return 0;
 }
 int http_show_malloc(HTTP_FD *p_link) {
+	web_printf(p_link, "<div>begin</div>\n");
 #ifdef WATCH_RAM
 	show_ram(1);
 #endif
+	web_printf(p_link, "<div>end</div>\n");
 	web_fin(p_link, 200);
 	return 0;
 }
@@ -880,17 +886,17 @@ int http_ws_test(HTTP_FD *p_link, E_WS_EVENT event) {
 	return 0;
 }
 static int save_dump(HTTP_FD *p_link) {
-    FILE *out_file = NULL;
-    const char *fname = NULL;
+	FILE *out_file = NULL;
+	const char *fname = NULL;
 
-    fname = web_query_str(p_link, "name", "h264dump.data");
-    out_file = fopen(fname, "ab");
-    if (out_file == NULL) {
-        return -1;
-    }
-    fwrite(p_link->ws_data.content, p_link->ws_data.used, 1, out_file);
-    fclose(out_file);
-    return 0;
+	fname = web_query_str(p_link, "name", "h264dump.data");
+	out_file = fopen(fname, "ab");
+	if (out_file == NULL) {
+		return -1;
+	}
+	fwrite(p_link->ws_data.content, p_link->ws_data.used, 1, out_file);
+	fclose(out_file);
+	return 0;
 }
 int http_ws_dump(HTTP_FD *p_link, E_WS_EVENT event) {
 	switch (event) {
@@ -898,7 +904,7 @@ int http_ws_dump(HTTP_FD *p_link, E_WS_EVENT event) {
 			printf("websocket [%s] %s:%u ONOPEN.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
 		case EVENT_ONMESSAGE:
 			printf("websocket [%s] %s:%u ONMESSAGE.\n", p_link->path, p_link->ip_peer, p_link->port_peer);
-            save_dump(p_link);
+			save_dump(p_link);
 			break;
 		case EVENT_ONCLOSE:
 			printf("websocket [%s] %s:%u ONCLOSE.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
@@ -1021,7 +1027,7 @@ printf("speed %.3lf\n", perf_info->speed);
 			printf("websocket [%s] %s:%u ONOPEN.\n", p_link->path, p_link->ip_peer, p_link->port_peer); break;
 		case EVENT_ONMESSAGE:
 			printf("websocket [%s] %s:%u ONMESSAGE.\n", p_link->path, p_link->ip_peer, p_link->port_peer);
-            save_dump(p_link);
+			save_dump(p_link);
 			break;
 		case EVENT_ONCLOSE:
 			session_unset_storage(p_link->session, "perf");
@@ -1161,6 +1167,7 @@ int req_dispatch(HTTP_FD *p_link) {
 	if (0 != set_session(p_link)) {
 		return 0;
 	}
+	web_set_header(p_link, "Alt-Svc", "h2=\":20443\"; ma=2592000");
 #if 1 /* auto login as anonymous */
 	if (!p_link->session->isonline) {
 		printf("user \"anonymous\" login.\n");

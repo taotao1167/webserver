@@ -46,8 +46,8 @@
 // #define error_printf(fmt,...)
 #define notice_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
 // #define notice_printf(fmt, ...)
-// #define debug_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
-#define debug_printf(fmt, ...)
+#define debug_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
+// #define debug_printf(fmt, ...)
 
 /* map status code and status string */
 typedef struct ST_HTTP_CODE_MAP {
@@ -203,16 +203,18 @@ func_end:
 #include <event2/event.h>
 
 typedef void (* OnTimer)(void *userdata);
-typedef void (* OnAccept)(void *backend, void *userdata, struct sockaddr *cli_addr);
+typedef void (* OnNotify)(void *userdata);
+typedef void (* OnAccept)(void *backend, void *userdata, struct sockaddr *peer_addr, struct sockaddr *local_addr);
 typedef void (* OnConnect)(void *backendio, void *userdata);
 typedef void (* OnRead)(void *backendio, void *userdata, uint8_t *content, size_t size);
 typedef void (* OnWrite)(void *backendio, void *userdata, size_t size);
 typedef void (* OnClose)(void *backendio, void *userdata);
-typedef void (* OnError)(void *backendio, void *userdata);
+typedef void (* OnError)(void *backendio, void *userdata, int code, const char *errmsg);
 
 typedef struct Backend {
 	struct evconnlistener *listener;
 	OnAccept on_accept;
+	int ip_version;
 #ifdef WITH_SSL
 	SSL_CTX *ssl_ctx;
 #endif
@@ -235,29 +237,65 @@ typedef struct BackendIo {
 
 static struct event_base *g_event_base = NULL;
 static OnTimer g_on_timer = NULL;
+static OnNotify g_on_notify = NULL;
+static struct event time_ev;
+static struct event msg_ev;
+static struct timeval tv;
+evutil_socket_t g_msg_fd[2] = {0};
 
 static void backend_on_timer(evutil_socket_t fd, short event, void *userdata) {
 	if (g_on_timer != NULL) {
 		g_on_timer(userdata);
 	}
 }
+static void backend_on_notify(evutil_socket_t fd, short event, void *userdata) {
+	if (g_on_notify != NULL) {
+		g_on_notify(userdata);
+	}
+}
+static void backend_loop_destroy() {
+	event_del(&time_ev);
+	event_del(&msg_ev);
+	if (g_event_base != NULL) {
+		event_base_free(g_event_base);
+		g_event_base = NULL;
+	}
+}
 
-static void backend_loop_create(void *userdata, OnTimer on_timer) {
-	struct event time_ev;
-	struct timeval tv;
+static void backend_loop_create(OnTimer on_timer, OnNotify on_notify, void *userdata) {
 	g_event_base = event_base_new();
-    if (g_event_base == NULL) {
-        emergency_printf("event_base_new failed.\n");
-        goto func_end;
-    }
+	if (g_event_base == NULL) {
+		emergency_printf("event_base_new failed.\n");
+		goto func_end;
+	}
 	g_on_timer = on_timer;
+	g_on_notify = on_notify;
 	event_assign(&time_ev, g_event_base, -1, EV_PERSIST, backend_on_timer, userdata);
 	evutil_timerclear(&tv);
 	tv.tv_sec = 1;
 	tv.tv_usec = 0;
 	event_add(&time_ev, &tv);
+
+#ifdef _WIN32
+#define LOCAL_SOCKETPAIR_AF AF_INET
+#else
+#define LOCAL_SOCKETPAIR_AF AF_UNIX
+#endif
+	if (evutil_socketpair(LOCAL_SOCKETPAIR_AF, SOCK_STREAM, 0, g_msg_fd) != 0) {
+		printf("evutil_socketpair failed.\n");
+		goto func_end;
+	}
+	event_assign(&msg_ev, g_event_base, g_msg_fd[0], EV_READ | EV_PERSIST, backend_on_notify, userdata);
+	if (event_add(&msg_ev, NULL) < 0) {
+		printf("event_add failed.\n");
+		goto func_end;
+	}
 func_end:
 	return;
+}
+
+static void backend_exit() {
+	event_base_loopexit(g_event_base, NULL);
 }
 
 static void backend_loop_run() {
@@ -272,6 +310,7 @@ static void backend_destroy(void *_backend) {
 		goto func_end;
 	}
 	if (backend->listener != NULL) {
+		evconnlistener_disable(backend->listener);
 		evconnlistener_free(backend->listener);
 	}
 	free(backend);
@@ -281,25 +320,25 @@ func_end:
 
 static void backendio_on_read(struct bufferevent *bev, void *userdata) {
 	BackendIo *backendio = NULL;
-    struct evbuffer *input = NULL;
-    size_t read_len = 0;
-    uint8_t *buf = NULL;
+	struct evbuffer *input = NULL;
+	size_t read_len = 0;
+	uint8_t *buf = NULL;
 
 	backendio = (BackendIo *)userdata;
 	if (backendio == NULL) {
-        goto func_end;
+		goto func_end;
 	}
-    input = bufferevent_get_input(bev);
-    if (input == NULL) {
-        goto func_end;
-    }
-    read_len = evbuffer_get_length(input);
-    buf = (uint8_t *)malloc(read_len);
+	input = bufferevent_get_input(bev);
+	if (input == NULL) {
+		goto func_end;
+	}
+	read_len = evbuffer_get_length(input);
+	buf = (uint8_t *)malloc(read_len);
 	if (buf == NULL) {
-        goto func_end;
+		goto func_end;
 	}
-    bufferevent_read(bev, buf, read_len);
-    // debug_printf("backend on_read: %ld\n", read_len);
+	bufferevent_read(bev, buf, read_len);
+	// debug_printf("backend on_read: %ld\n", read_len);
 	// hexdump(buf, read_len);
 	if (backendio->on_read) {
 		backendio->on_read(backendio, backendio->userdata, buf, read_len);
@@ -312,16 +351,16 @@ func_end:
 static void backendio_on_write(struct bufferevent *bev, void *userdata) {
 	BackendIo *backendio = NULL;
 	struct evbuffer *output = NULL;
-    size_t write_len = 0;
+	size_t write_len = 0;
 
 	backendio = (BackendIo *)userdata;
 	if (backendio == NULL) {
-        goto func_end;
+		goto func_end;
 	}
 	output = bufferevent_get_output(bev);
-    if (output == NULL) {
-        goto func_end;
-    }
+	if (output == NULL) {
+		goto func_end;
+	}
 	write_len = (backendio->sending_len - evbuffer_get_length(output));
 	debug_printf("backend on_write %zu/%zu\n", write_len, backendio->sending_len);
 	if (backendio->on_write) {
@@ -340,31 +379,89 @@ static void backendio_on_event(struct bufferevent *bev, short event, void *userd
 
 	backendio = (BackendIo *)userdata;
 	if (backendio == NULL) {
-        goto func_end;
+		goto func_end;
 	}
 	if (event & BEV_EVENT_EOF) {
-        debug_printf("backend on_close\n");
+		debug_printf("backend on_close\n");
 		if (backendio->on_close) {
 			backendio->on_close(backendio, backendio->userdata);
 		}
-    } else if (event & BEV_EVENT_ERROR) {
-        debug_printf("backend on_error\n");
+	} else if (event & BEV_EVENT_ERROR) {
+		debug_printf("backend on_error [%d] %s\n", EVUTIL_SOCKET_ERROR(), strerror(EVUTIL_SOCKET_ERROR()));
 		if (backendio->on_error) {
-			backendio->on_error(backendio, backendio->userdata);
+			backendio->on_error(backendio, backendio->userdata, EVUTIL_SOCKET_ERROR(), strerror(EVUTIL_SOCKET_ERROR()));
 		}
-    } else {
-        error_printf("backend on_event %04x\n", event);
-    }
-    // bufferevent_free(backendio->io);
+	} else if (event & BEV_EVENT_CONNECTED) {
+		debug_printf("backend on_connect\n");
+		if (backendio->on_connect) {
+			backendio->on_connect(backendio, backendio->userdata);
+		}
+		bufferevent_setcb(backendio->io, backendio_on_read, backendio_on_write, backendio_on_event, backendio);
+		bufferevent_enable(backendio->io, EV_READ);
+		bufferevent_disable(backendio->io, EV_WRITE);
+	} else {
+		error_printf("backend on_event %04x\n", event);
+	}
 func_end:
 	return;
 }
+static void backendio_connect(const char *ip, uint16_t port, OnConnect on_connect, OnError on_error, void *userdata) {
+	BackendIo *backendio = NULL;
+	int ret = -1, enable = 1;
+	evutil_socket_t fd = -1;
+	struct sockaddr_in addr;
 
-static void backend_on_accept(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *sa, int socklen, void *userdata) {
+	backendio = (BackendIo *)malloc(sizeof(BackendIo));
+	if (backendio == NULL) {
+		goto func_end;
+	}
+	memset(backendio, 0x00, sizeof(BackendIo));
+	fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (fd < 0) {
+		goto func_end;
+	}
+	if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (void *)&enable, sizeof(enable)) < 0) {
+		printf("setsockopt failed!\n");
+		goto func_end;
+	}
+
+	backendio->io = bufferevent_socket_new(g_event_base, fd, BEV_OPT_CLOSE_ON_FREE);
+	if (backendio->io == NULL) {
+		error_printf("bufferevent_socket_new failed.\n");
+		goto func_end;
+	}
+	backendio->on_connect = on_connect;
+	backendio->on_error = on_error;
+	backendio->userdata = userdata;
+	memset(&addr, 0x00, sizeof(struct sockaddr_in));
+	addr.sin_family = AF_INET;
+	inet_pton(AF_INET, ip, (void *)&addr.sin_addr);
+	addr.sin_port = htons(port);
+	bufferevent_setcb(backendio->io, NULL, NULL, backendio_on_event, backendio);
+	bufferevent_socket_connect(backendio->io, (struct sockaddr *)&addr, sizeof(struct sockaddr_in));
+	ret = 0;
+func_end:
+	if (ret != 0) {
+		if (fd > 0) {
+			close(fd);
+		}
+		if (backendio != NULL) {
+			free(backendio);
+		}
+	}
+	return;
+}
+
+static void backend_on_accept(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *peer_sa, int socklen, void *userdata) {
 	Backend *backend = NULL;
 	BackendIo *backendio = NULL;
-	char ip[48] = {0};
+	char ip_peer[48] = {0}, ip_local[48] = {0};
 	int tcp_nodelay = 1;
+#ifdef WITH_IPV6
+	struct sockaddr_in6 local_sa6;
+#endif
+	struct sockaddr_in local_sa;
+	socklen_t addr_len = 0;
 
 	backend = (Backend *)userdata;
 	if (backend == NULL) {
@@ -386,21 +483,42 @@ static void backend_on_accept(struct evconnlistener *listener, evutil_socket_t f
 	{
 		backendio->io = bufferevent_socket_new(g_event_base, fd, BEV_OPT_CLOSE_ON_FREE);
 	}
-    if (backendio->io == NULL) {
-        error_printf("bufferevent_socket_new failed.\n");
+	if (backendio->io == NULL) {
+		error_printf("bufferevent_socket_new failed.\n");
 		goto func_end;
-    }
-	inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)sa)->sin6_addr), ip, sizeof(ip)); /* TODO IPv4/IPv6 */
-	debug_printf("backend on_accept: [%s]:%d\n", ip, ntohs(((struct sockaddr_in6 *)sa)->sin6_port)); /* TODO IPv4/IPv6 */
+	}
+#ifdef WITH_IPV6
+	if (backend->ip_version == 6) {
+		inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)peer_sa)->sin6_addr), ip_peer, sizeof(ip_peer));
+		addr_len = sizeof(struct sockaddr_in6);
+		getsockname(fd, (struct sockaddr *)&local_sa6, &addr_len);
+		inet_ntop(AF_INET6, &(local_sa6.sin6_addr), ip_local, sizeof(ip_local));
+		debug_printf("backend on_accept6: [%s]:%d to [%s]:%d\n", ip_peer, ntohs(((struct sockaddr_in6 *)peer_sa)->sin6_port), ip_local, ntohs(local_sa6.sin6_port));
+	} else
+#endif
+	{
+		inet_ntop(AF_INET, &(((struct sockaddr_in *)peer_sa)->sin_addr), ip_peer, sizeof(ip_peer));
+		addr_len = sizeof(struct sockaddr_in6);
+		getsockname(fd, (struct sockaddr *)&local_sa, &addr_len);
+		inet_ntop(AF_INET, &(local_sa.sin_addr), ip_local, sizeof(ip_local));
+		debug_printf("backend on_accept4: %s:%d to %s:%d\n", ip_peer, ntohs(((struct sockaddr_in *)peer_sa)->sin_port), ip_local, ntohs(local_sa.sin_port));
+	}
 	if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (void *)&tcp_nodelay, sizeof(tcp_nodelay)) < 0) {
 		emergency_printf("setsockopt failed.\n");
 		goto func_end;
 	}
-    bufferevent_setcb(backendio->io, backendio_on_read, backendio_on_write, backendio_on_event, backendio);
-    bufferevent_enable(backendio->io, EV_READ);
-    bufferevent_disable(backendio->io, EV_WRITE);
+	bufferevent_setcb(backendio->io, backendio_on_read, backendio_on_write, backendio_on_event, backendio);
+	bufferevent_enable(backendio->io, EV_READ);
+	bufferevent_disable(backendio->io, EV_WRITE);
 	if (backend->on_accept) {
-		backend->on_accept(backendio, backend->userdata, sa);
+#ifdef WITH_IPV6
+		if (backend->ip_version == 6) {
+			backend->on_accept(backendio, backend->userdata, peer_sa, (struct sockaddr *)&local_sa6);
+		} else
+#endif
+		{
+			backend->on_accept(backendio, backend->userdata, peer_sa, (struct sockaddr *)&local_sa);
+		}
 	}
 func_end:
 	return;
@@ -428,6 +546,7 @@ static void *backend_create(int ip_version, unsigned short port, const char *crt
 
 #ifdef WITH_IPV6
 	if (ip_version == 6) {
+		backend->ip_version = 6;
 		memset(&svr_addr6, 0x00, sizeof(svr_addr6));
 		svr_addr6.sin6_family = AF_INET6;
 		svr_addr6.sin6_port = htons(port);
@@ -435,22 +554,18 @@ static void *backend_create(int ip_version, unsigned short port, const char *crt
 	} else
 #endif
 	{
+		backend->ip_version = 4;
 		memset(&svr_addr, 0x00, sizeof(svr_addr));
 		svr_addr.sin_family = AF_INET;
 		svr_addr.sin_port = htons(port);
 		backend->listener = evconnlistener_new_bind(g_event_base, backend_on_accept, (void *)backend, LEV_OPT_REUSEABLE | LEV_OPT_CLOSE_ON_FREE, -1, (struct sockaddr *)&svr_addr, sizeof(svr_addr));
 	}
 	if (backend->listener == NULL) {
-        error_printf("evconnlistener_new_bind failed.\n");
+		error_printf("evconnlistener_new_bind failed.\n");
 		goto func_end;
 	}
 	backend->on_accept = on_accept;
 	backend->userdata = userdata;
-	if (crt_file != NULL) {
-		/* TODO */
-	} else {
-		/* TODO */
-	}
 	ret = 0;
 func_end:
 	if (ret != 0) {
@@ -517,6 +632,7 @@ static int backendio_close(void *_backendio) {
 	if (backendio == NULL) {
 		goto func_end;
 	}
+	bufferevent_disable(backendio->io, bufferevent_get_enabled(backendio->io));
 	bufferevent_free(backendio->io);
 	free(backendio);
 	ret = 0;
@@ -2296,7 +2412,7 @@ static void ws_read(HTTP_FD *p_link, const uint8_t *content, size_t size) {
 }
 #endif
 
-static void web_on_read(void *_backend, void *userdata, uint8_t *content, size_t size) {
+static void web_on_read(void *backendio, void *userdata, uint8_t *content, size_t size) {
 	HTTP_FD *p_link = (HTTP_FD *)userdata;
 
 	p_link->tm_last_active = time(0);
@@ -2312,7 +2428,7 @@ static void web_on_read(void *_backend, void *userdata, uint8_t *content, size_t
 	return;
 }
 
-static void web_on_write(void *_backend, void *userdata, size_t size) {
+static void web_on_write(void *backendio, void *userdata, size_t size) {
 	HTTP_FD *p_link = (HTTP_FD *)userdata;
 
 	p_link->tm_last_active = time(0);
@@ -2360,6 +2476,12 @@ func_end:
 }
 
 static void web_on_close(void *backendio, void *userdata) {
+	HTTP_FD *p_link = (HTTP_FD *)userdata;
+	p_link->state = STATE_CLOSED;
+
+	apply_change(p_link);
+}
+static void web_on_error(void *backendio, void *userdata, int code, const char *errmsg) {
 	HTTP_FD *p_link = (HTTP_FD *)userdata;
 	p_link->state = STATE_CLOSED;
 
@@ -2510,7 +2632,7 @@ void msg_cb_web(short event, void *userdata) { /* TODO recv posted event */
 	msg_queue_check();
 }
 
-static void web_on_accept(void *backendio, void *userdata, struct sockaddr *addr) {
+static void web_on_accept(void *backendio, void *userdata, struct sockaddr *peer_addr, struct sockaddr *local_addr) {
 	int ret = -1;
 	WEB_SERVER *server = (WEB_SERVER *)userdata;
 	HTTP_FD *new_link = NULL;
@@ -2523,13 +2645,17 @@ static void web_on_accept(void *backendio, void *userdata, struct sockaddr *addr
 	memset(new_link, 0x00, sizeof(HTTP_FD));
 #ifdef WITH_IPV6
 	if (server->ip_version == 6) {
-		inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)addr)->sin6_addr), new_link->ip_peer, sizeof(new_link->ip_peer));
-		new_link->port_peer = ntohs(((struct sockaddr_in6 *)addr)->sin6_port);
+		inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)peer_addr)->sin6_addr), new_link->ip_peer, sizeof(new_link->ip_peer));
+		new_link->port_peer = ntohs(((struct sockaddr_in6 *)peer_addr)->sin6_port);
+		inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)local_addr)->sin6_addr), new_link->ip_local, sizeof(new_link->ip_local));
+		new_link->port_local = ntohs(((struct sockaddr_in6 *)local_addr)->sin6_port);
 	} else
 #endif
 	{
-		inet_ntop(AF_INET, &(((struct sockaddr_in *)addr)->sin_addr), new_link->ip_peer, sizeof(new_link->ip_peer));
-		new_link->port_peer = ntohs(((struct sockaddr_in *)addr)->sin_port);
+		inet_ntop(AF_INET, &(((struct sockaddr_in *)peer_addr)->sin_addr), new_link->ip_peer, sizeof(new_link->ip_peer));
+		new_link->port_peer = ntohs(((struct sockaddr_in *)peer_addr)->sin_port);
+		inet_ntop(AF_INET, &(((struct sockaddr_in *)local_addr)->sin_addr), new_link->ip_local, sizeof(new_link->ip_local));
+		new_link->port_local = ntohs(((struct sockaddr_in *)local_addr)->sin_port);
 	}
 	new_link->backendio = backendio;
 	new_link->server = server;
@@ -2543,14 +2669,18 @@ static void web_on_accept(void *backendio, void *userdata, struct sockaddr *addr
 	tt_buffer_init(&(new_link->ws_data));
 	tt_buffer_init(&(new_link->ws_response));
 #endif
-	debug_printf("link from [%s]:%d.\n", new_link->ip_peer, new_link->port_peer);
+	if (server->ip_version == 6) {
+		debug_printf("link from6 [%s]:%d to [%s]:%d.\n", new_link->ip_peer, new_link->port_peer, new_link->ip_local, new_link->port_local);
+	} else {
+		debug_printf("link from4 %s:%d to %s:%d.\n", new_link->ip_peer, new_link->port_peer, new_link->ip_local, new_link->port_local);
+	}
 	new_link->prev = NULL;
 	new_link->next = g_http_links;
 	if (g_http_links) {
 		g_http_links->prev = new_link;
 	}
 	g_http_links = new_link;
-	backendio_set_callback(backendio, web_on_read, web_on_write, web_on_close, web_on_close/*on_error*/, new_link);
+	backendio_set_callback(backendio, web_on_read, web_on_write, web_on_close, web_on_error, new_link);
 	apply_change(new_link);
 	ret = 0;
 func_end:
@@ -2648,6 +2778,7 @@ static WEB_SERVER *create_server(const char *name, int ip_version, unsigned shor
 	} else {
 		notice_printf("IPv%d: bind port %u success.\n", ip_version, port);
 	}
+	new_server->is_ssl = (crt_file != NULL);
 	new_server->prev = NULL;
 	new_server->next = g_servers;
 	if (g_servers) {
@@ -2683,7 +2814,7 @@ WEB_SERVER *create_https(const char *name, int ip_version, unsigned short port, 
 
 
 int web_server_run() {
-	backend_loop_create(web_on_timer, NULL);
+	backend_loop_create(web_on_timer, NULL, NULL);
 
 #define WEB_ROOT "./static"
 #define SSL_CRT "/home/www/server.crt"
