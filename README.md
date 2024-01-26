@@ -1,6 +1,10 @@
 # webserver
 a tiny web server based on libevent
 
+# Environment
+`apt install pkg-config`
+`apt install libevent-dev`
+
 # Compile
 ```bash
 # 带ssl的静态库
@@ -8,3 +12,4 @@ cmake .. -DEVENT__DISABLE_OPENSSL=OFF -DEVENT__DISABLE_TESTS=ON -DEVENT__DISABLE
 # 使用
 cmake -DLibevent_DIR=/home/www/libevent_ins/lib/cmake/libevent ..
 ```
+

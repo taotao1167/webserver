@@ -46,8 +46,8 @@
 // #define error_printf(fmt,...)
 #define notice_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
 // #define notice_printf(fmt, ...)
-#define debug_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
-// #define debug_printf(fmt, ...)
+// #define debug_printf(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#define debug_printf(fmt, ...)
 
 /* map status code and status string */
 typedef struct ST_HTTP_CODE_MAP {
@@ -457,7 +457,7 @@ static void backend_on_accept(struct evconnlistener *listener, evutil_socket_t f
 	BackendIo *backendio = NULL;
 	char ip_peer[48] = {0}, ip_local[48] = {0};
 	int tcp_nodelay = 1;
-#ifdef WITH_IPV6
+#if defined(WITH_IPV6) && defined(LEV_OPT_BIND_IPV6ONLY)
 	struct sockaddr_in6 local_sa6;
 #endif
 	struct sockaddr_in local_sa;
@@ -487,7 +487,7 @@ static void backend_on_accept(struct evconnlistener *listener, evutil_socket_t f
 		error_printf("bufferevent_socket_new failed.\n");
 		goto func_end;
 	}
-#ifdef WITH_IPV6
+#if defined(WITH_IPV6) && defined(LEV_OPT_BIND_IPV6ONLY)
 	if (backend->ip_version == 6) {
 		inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)peer_sa)->sin6_addr), ip_peer, sizeof(ip_peer));
 		addr_len = sizeof(struct sockaddr_in6);
@@ -511,7 +511,7 @@ static void backend_on_accept(struct evconnlistener *listener, evutil_socket_t f
 	bufferevent_enable(backendio->io, EV_READ);
 	bufferevent_disable(backendio->io, EV_WRITE);
 	if (backend->on_accept) {
-#ifdef WITH_IPV6
+#if defined(WITH_IPV6) && defined(LEV_OPT_BIND_IPV6ONLY)
 		if (backend->ip_version == 6) {
 			backend->on_accept(backendio, backend->userdata, peer_sa, (struct sockaddr *)&local_sa6);
 		} else
@@ -528,7 +528,7 @@ static void *backend_create(int ip_version, unsigned short port, const char *crt
 	int ret = -1;
 	Backend *backend = NULL;
 	struct sockaddr_in svr_addr;
-#ifdef WITH_IPV6
+#if defined(WITH_IPV6) && defined(LEV_OPT_BIND_IPV6ONLY)
 	struct sockaddr_in6 svr_addr6;
 #endif
 
@@ -544,7 +544,7 @@ static void *backend_create(int ip_version, unsigned short port, const char *crt
 	}
 #endif
 
-#ifdef WITH_IPV6
+#if defined(WITH_IPV6) && defined(LEV_OPT_BIND_IPV6ONLY)
 	if (ip_version == 6) {
 		backend->ip_version = 6;
 		memset(&svr_addr6, 0x00, sizeof(svr_addr6));
@@ -2643,7 +2643,7 @@ static void web_on_accept(void *backendio, void *userdata, struct sockaddr *peer
 		goto func_end;
 	}
 	memset(new_link, 0x00, sizeof(HTTP_FD));
-#ifdef WITH_IPV6
+#if defined(WITH_IPV6) && defined(LEV_OPT_BIND_IPV6ONLY)
 	if (server->ip_version == 6) {
 		inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)peer_addr)->sin6_addr), new_link->ip_peer, sizeof(new_link->ip_peer));
 		new_link->port_peer = ntohs(((struct sockaddr_in6 *)peer_addr)->sin6_port);
@@ -2817,14 +2817,14 @@ int web_server_run() {
 	backend_loop_create(web_on_timer, NULL, NULL);
 
 #define WEB_ROOT "./static"
-#define SSL_CRT "/home/www/server.crt"
-#define SSL_KEY "/home/www/server.key"
-#ifdef WITH_IPV6
+#define SSL_CRT "/root/server.crt"
+#define SSL_KEY "/root/server.key"
+#if defined(WITH_IPV6) && defined(LEV_OPT_BIND_IPV6ONLY)
 	create_http("default", 6, 20080, WEB_ROOT);
 #endif
 	create_http("default", 4, 20080, WEB_ROOT);
 #ifdef WITH_SSL
-#ifdef WITH_IPV6
+#if defined(WITH_IPV6) && defined(LEV_OPT_BIND_IPV6ONLY)
 	create_https("default", 6, 20443, WEB_ROOT, SSL_CRT, SSL_KEY);
 #endif
 	create_https("default", 4, 20443, WEB_ROOT, SSL_CRT, SSL_KEY);
